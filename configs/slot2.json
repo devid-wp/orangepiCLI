@@ -1,1 +1,1 @@
-{"slot":"slot2","enabled":false,"display_name":"Empty Slot 2","description":"","working_directory":"","start_command":"","stop_command":"","restart_command":"","log_file":"","use_sudo":false,"auto_restart":false,"environment":{}}
+{"slot":"slot2","enabled":false,"display_name":"Empty Slot 2","description":"","working_directory":"","start_command":"","stop_command":"","restart_command":"","log_file":"","use_sudo":false,"auto_restart":false,"environment":{},"env_file":""}
