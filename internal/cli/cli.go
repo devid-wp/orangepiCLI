@@ -12,6 +12,7 @@ import (
 const usage = `OrangeCTL manages ten universal process slots on Orange Pi.
 
 Usage:
+  orangectl init
   orangectl list
   orangectl validate [slot1..slot10]
   orangectl help
@@ -32,6 +33,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return usageError(stderr, "list does not accept arguments")
 		}
 		return list(stdout)
+	case "init":
+		if len(args) != 1 {
+			return usageError(stderr, "init does not accept arguments")
+		}
+		return initialize(stdout, stderr)
 	case "validate":
 		if len(args) > 2 {
 			return usageError(stderr, "validate accepts at most one slot")
@@ -47,6 +53,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	default:
 		return usageError(stderr, fmt.Sprintf("unknown command %q", args[0]))
 	}
+}
+
+func initialize(stdout, stderr io.Writer) int {
+	result, err := config.Initialize()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Initialized OrangeCTL: %d created, %d kept\n", len(result.Created), len(result.Existing))
+	fmt.Fprintf(stdout, "Config directory: %s\n", config.Directory())
+	return 0
 }
 
 func usageError(stderr io.Writer, message string) int {

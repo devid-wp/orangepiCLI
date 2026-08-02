@@ -38,6 +38,15 @@ func LogDir() string {
 	return filepath.Join(StateDir(), "logs")
 }
 
+func Ensure() error {
+	for _, directory := range []string{ConfigDir(), StateDir(), PIDDir(), LogDir()} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func homeDir() string {
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {

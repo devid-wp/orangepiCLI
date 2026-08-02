@@ -43,3 +43,28 @@ func TestRejectsUnknownSlot(t *testing.T) {
 		t.Fatalf("Run() code = %d", code)
 	}
 }
+
+func TestInitCreatesConfigsWithoutOverwriting(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv(config.ConfigDirEnv, configDir)
+	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	existing := filepath.Join(configDir, "slot1.json")
+	if err := os.WriteFile(existing, []byte("keep me\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"init"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run() code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "9 created, 1 kept") {
+		t.Fatalf("output = %q", stdout.String())
+	}
+	contents, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "keep me\n" {
+		t.Fatalf("existing config was overwritten: %q", contents)
+	}
+}
