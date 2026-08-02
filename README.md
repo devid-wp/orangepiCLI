@@ -1,9 +1,9 @@
 # OrangeCTL
 
 OrangeCTL is a Go CLI for managing up to ten user-configured processes on an
-Orange Pi. The current implementation provides ten empty JSON slots plus the
-`list` and `validate` commands. It has no runtime dependencies and builds into a
-single executable.
+Orange Pi. The current implementation provides the `init`, `list`, and
+`validate` commands. It has no runtime dependencies and builds into a single
+executable.
 
 ## Requirements
 
@@ -36,20 +36,32 @@ GOOS=linux GOARCH=arm GOARM=7 go build -o dist/orangectl-linux-armv7 ./cmd/orang
 
 ## Use
 
-Run from the repository root so the default `configs` directory can be found:
+Initialize the application and create ten empty configuration slots:
 
 ```bash
-./orangectl list
-./orangectl validate
-./orangectl validate slot1
+orangectl init
 ```
 
-For a system-wide installation, set an explicit configuration directory:
+By default, OrangeCTL follows the XDG directory layout:
+
+- configurations: `$XDG_CONFIG_HOME/orangectl` or `~/.config/orangectl`;
+- state: `$XDG_STATE_HOME/orangectl` or `~/.local/state/orangectl`;
+- process state: `<state directory>/pids`;
+- CLI logs: `<state directory>/logs`.
+
+For local development, point OrangeCTL at the directories in this repository:
 
 ```bash
-export ORANGECTL_CONFIG_DIR=/etc/orangectl/configs
+export ORANGECTL_CONFIG_DIR=./configs
+export ORANGECTL_STATE_DIR=./state
 orangectl list
+orangectl validate
+orangectl validate slot1
 ```
 
-Edit one of the files under `configs/`, set `enabled` to `true`, and provide its
+Explicit `ORANGECTL_CONFIG_DIR` and `ORANGECTL_STATE_DIR` values take precedence
+over XDG variables. Running `orangectl init` is idempotent: existing slot files
+are kept unchanged.
+
+Edit one of the generated slot files, set `enabled` to `true`, and provide its
 working directory and start command.
