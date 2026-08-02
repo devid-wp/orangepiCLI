@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/devid-wp/orangepiCLI/internal/paths"
 )
 
-const ConfigDirEnv = "ORANGECTL_CONFIG_DIR"
+const ConfigDirEnv = paths.ConfigDirEnv
 
 var AllowedSlots = []string{
 	"slot1", "slot2", "slot3", "slot4", "slot5",
@@ -49,10 +51,7 @@ func RequireAllowed(name string) error {
 }
 
 func Directory() string {
-	if directory := os.Getenv(ConfigDirEnv); directory != "" {
-		return directory
-	}
-	return "configs"
+	return paths.ConfigDir()
 }
 
 func Load(name string) (SlotConfig, error) {
