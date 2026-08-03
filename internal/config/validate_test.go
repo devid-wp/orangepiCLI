@@ -85,3 +85,31 @@ func TestValidateRejectsWhitespaceOnlyRequiredFields(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateEnvironmentKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		invalid bool
+	}{
+		{name: "letters", key: "API_TOKEN"},
+		{name: "leading underscore", key: "_PRIVATE"},
+		{name: "digits after first character", key: "WORKER_2"},
+		{name: "empty", key: "", invalid: true},
+		{name: "starts with digit", key: "2_WORKERS", invalid: true},
+		{name: "contains equals", key: "TOKEN=value", invalid: true},
+		{name: "contains whitespace", key: "API TOKEN", invalid: true},
+		{name: "contains hyphen", key: "API-TOKEN", invalid: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			slot := SlotConfig{Environment: map[string]string{test.key: "secret"}}
+			errors := Validate(slot)
+			gotInvalid := slices.Contains(errors, "invalid environment key")
+			if gotInvalid != test.invalid {
+				t.Fatalf("Validate() = %v, invalid key = %t, want %t", errors, gotInvalid, test.invalid)
+			}
+		})
+	}
+}

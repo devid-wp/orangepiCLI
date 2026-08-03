@@ -3,12 +3,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 )
 
+var environmentKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func Validate(slot SlotConfig) []string {
 	var errors []string
+	for key := range slot.Environment {
+		if !environmentKeyPattern.MatchString(key) {
+			errors = append(errors, "invalid environment key")
+		}
+	}
 	if !slot.Enabled {
 		return errors
 	}
