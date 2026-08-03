@@ -47,6 +47,13 @@ func TestInitializeCreatesDirectoriesAndConfigs(t *testing.T) {
 			}
 		}
 	}
+	temporaryFiles, err := filepath.Glob(filepath.Join(configDir, ".*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporaryFiles) != 0 {
+		t.Fatalf("temporary configuration files remain: %v", temporaryFiles)
+	}
 }
 
 func TestInitializePreservesExistingConfig(t *testing.T) {

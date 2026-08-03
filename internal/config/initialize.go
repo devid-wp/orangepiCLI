@@ -38,12 +38,12 @@ func Initialize() (InitializeResult, error) {
 
 func createEmptyConfig(name string) (bool, error) {
 	path := filepath.Join(Directory(), name+".json")
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	_, err := os.Lstat(path)
+	if err == nil {
 		return false, nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("create configuration %s: %w", path, err)
+	if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("inspect configuration %s: %w", path, err)
 	}
 
 	slotNumber := strings.TrimPrefix(name, "slot")
@@ -52,16 +52,38 @@ func createEmptyConfig(name string) (bool, error) {
 		DisplayName: "Empty Slot " + slotNumber,
 		Environment: map[string]string{},
 	}
+	if err := writeConfigAtomically(path, slot); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func writeConfigAtomically(path string, slot SlotConfig) (err error) {
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary configuration for %s: %w", path, err)
+	}
+	temporaryPath := file.Name()
+	defer func() {
+		_ = file.Close()
+		if err != nil {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(slot); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return false, fmt.Errorf("write configuration %s: %w", path, err)
+		return fmt.Errorf("write configuration %s: %w", path, err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync configuration %s: %w", path, err)
 	}
 	if err := file.Close(); err != nil {
-		_ = os.Remove(path)
-		return false, fmt.Errorf("close configuration %s: %w", path, err)
+		return fmt.Errorf("close configuration %s: %w", path, err)
 	}
-	return true, nil
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace configuration %s: %w", path, err)
+	}
+	return nil
 }
