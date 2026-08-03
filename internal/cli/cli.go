@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/devid-wp/orangepiCLI/internal/config"
@@ -49,6 +48,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "Error: %v\n", err)
 				return 2
 			}
+		}
 		return validate(stdout, name)
 	default:
 		return usageError(stderr, fmt.Sprintf("unknown command %q", args[0]))
@@ -105,11 +105,11 @@ func validate(stdout io.Writer, requested string) int {
 	fmt.Fprintln(w, "SLOT\tRESULT")
 	failed := false
 	for _, name := range targets {
-		slot, errors := config.LoadAndValidate(name)
+		slot, validationErrors := config.LoadAndValidate(name)
 		result := "OK"
-		if len(errors) > 0 {
+		if len(validationErrors) > 0 {
 			failed = true
-			result = strings.Join(errors, "; ")
+			result = config.FormatErrors(validationErrors)
 		} else if !slot.Enabled {
 			result = "disabled"
 		}

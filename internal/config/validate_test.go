@@ -4,10 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 )
+
+func containsValidationMessage(validationErrors ValidationErrors, message string) bool {
+	for _, validationError := range validationErrors {
+		if validationError.Message == message {
+			return true
+		}
+	}
+	return false
+}
 
 func enabledSlot(t *testing.T) SlotConfig {
 	t.Helper()
@@ -31,7 +39,7 @@ func TestValidateEnvFileRejectsSymbolicLink(t *testing.T) {
 		t.Skipf("symbolic links are unavailable: %v", err)
 	}
 
-	if errors := Validate(slot); !slices.Contains(errors, "env_file does not exist") {
+	if errors := Validate(slot); !containsValidationMessage(errors, "env_file does not exist") {
 		t.Fatalf("Validate() = %v, want unsafe env_file error", errors)
 	}
 }
@@ -49,7 +57,7 @@ func TestValidateEnvFileRejectsUnsafePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if errors := Validate(slot); !slices.Contains(errors, "env_file has unsafe permissions") {
+	if errors := Validate(slot); !containsValidationMessage(errors, "env_file has unsafe permissions") {
 		t.Fatalf("Validate() = %v, want unsafe-permissions error", errors)
 	}
 }
@@ -80,7 +88,7 @@ func TestValidateRejectsWhitespaceOnlyRequiredFields(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			slot := enabledSlot(t)
 			test.apply(&slot)
-			if errors := Validate(slot); !slices.Contains(errors, test.want) {
+			if errors := Validate(slot); !containsValidationMessage(errors, test.want) {
 				t.Fatalf("Validate() = %v, want %q", errors, test.want)
 			}
 		})
@@ -107,11 +115,31 @@ func TestValidateEnvironmentKeys(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			slot := SlotConfig{Environment: map[string]string{test.key: "secret"}}
 			errors := Validate(slot)
-			gotInvalid := slices.Contains(errors, "invalid environment key")
+			gotInvalid := containsValidationMessage(errors, "invalid environment key")
 			if gotInvalid != test.invalid {
 				t.Fatalf("Validate() = %v, invalid key = %t, want %t", errors, gotInvalid, test.invalid)
 			}
 		})
+	}
+}
+
+func TestValidateReturnsStructuredErrors(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.WorkingDirectory = " \t"
+	slot.StartCommand = ""
+
+	validationErrors := Validate(slot)
+	if len(validationErrors) != 2 {
+		t.Fatalf("Validate() = %+v, want two errors", validationErrors)
+	}
+	if got := validationErrors[0]; got.Field != "working_directory" || got.Code != CodeMissing {
+		t.Fatalf("first validation error = %+v", got)
+	}
+	if got := validationErrors[1]; got.Field != "start_command" || got.Code != CodeMissing {
+		t.Fatalf("second validation error = %+v", got)
+	}
+	if got := FormatErrors(validationErrors); got != "missing working_directory; missing start_command" {
+		t.Fatalf("FormatErrors() = %q", got)
 	}
 }
 

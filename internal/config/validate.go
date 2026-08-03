@@ -20,48 +20,95 @@ const (
 	messageEnvFileUnsafePermissions = "env_file has unsafe permissions"
 )
 
-func Validate(slot SlotConfig) []string {
-	var errors []string
+type ValidationCode string
+
+const (
+	CodeInvalid           ValidationCode = "invalid"
+	CodeMissing           ValidationCode = "missing"
+	CodeNotFound          ValidationCode = "not_found"
+	CodeUnsafePermissions ValidationCode = "unsafe_permissions"
+	CodeLoadFailed        ValidationCode = "load_failed"
+)
+
+type ValidationError struct {
+	Field   string         `json:"field"`
+	Code    ValidationCode `json:"code"`
+	Message string         `json:"message"`
+	Cause   error          `json:"-"`
+}
+
+func (validationError ValidationError) Error() string {
+	return validationError.Message
+}
+
+func (validationError ValidationError) Unwrap() error {
+	return validationError.Cause
+}
+
+type ValidationErrors []ValidationError
+
+func Validate(slot SlotConfig) ValidationErrors {
+	var validationErrors ValidationErrors
 	for key := range slot.Environment {
 		if !environmentKeyPattern.MatchString(key) {
-			errors = append(errors, messageInvalidEnvironmentKey)
+			validationErrors = append(validationErrors, ValidationError{
+				Field: "environment", Code: CodeInvalid, Message: messageInvalidEnvironmentKey,
+			})
 		}
 	}
 	if !slot.Enabled {
-		return errors
+		return validationErrors
 	}
 	if strings.TrimSpace(slot.WorkingDirectory) == "" {
-		errors = append(errors, messageMissingWorkingDirectory)
+		validationErrors = append(validationErrors, ValidationError{
+			Field: "working_directory", Code: CodeMissing, Message: messageMissingWorkingDirectory,
+		})
 	} else if info, err := os.Stat(slot.WorkingDirectory); err != nil || !info.IsDir() {
-		errors = append(errors, messageInvalidWorkingDirectory)
+		validationErrors = append(validationErrors, ValidationError{
+			Field: "working_directory", Code: CodeInvalid, Message: messageInvalidWorkingDirectory, Cause: err,
+		})
 	}
 	if strings.TrimSpace(slot.StartCommand) == "" {
-		errors = append(errors, messageMissingStartCommand)
+		validationErrors = append(validationErrors, ValidationError{
+			Field: "start_command", Code: CodeMissing, Message: messageMissingStartCommand,
+		})
 	}
 	if slot.LogFile != "" {
 		if info, err := os.Stat(slot.LogFile); err != nil || info.IsDir() {
-			errors = append(errors, messageLogFileDoesNotExist)
+			validationErrors = append(validationErrors, ValidationError{
+				Field: "log_file", Code: CodeNotFound, Message: messageLogFileDoesNotExist, Cause: err,
+			})
 		}
 	}
 	if slot.EnvFile != "" {
 		info, err := os.Lstat(slot.EnvFile)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			errors = append(errors, messageEnvFileDoesNotExist)
+			validationErrors = append(validationErrors, ValidationError{
+				Field: "env_file", Code: CodeNotFound, Message: messageEnvFileDoesNotExist, Cause: err,
+			})
 		} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-			errors = append(errors, messageEnvFileUnsafePermissions)
+			validationErrors = append(validationErrors, ValidationError{
+				Field: "env_file", Code: CodeUnsafePermissions, Message: messageEnvFileUnsafePermissions,
+			})
 		}
 	}
-	return errors
+	return validationErrors
 }
 
-func LoadAndValidate(name string) (SlotConfig, []string) {
+func LoadAndValidate(name string) (SlotConfig, ValidationErrors) {
 	slot, err := Load(name)
 	if err != nil {
-		return SlotConfig{}, []string{err.Error()}
+		return SlotConfig{}, ValidationErrors{{
+			Field: "config", Code: CodeLoadFailed, Message: err.Error(), Cause: err,
+		}}
 	}
 	return slot, Validate(slot)
 }
 
-func FormatErrors(errors []string) string {
-	return fmt.Sprintf("%s", strings.Join(errors, "; "))
+func FormatErrors(validationErrors ValidationErrors) string {
+	messages := make([]string, 0, len(validationErrors))
+	for _, validationError := range validationErrors {
+		messages = append(messages, validationError.Error())
+	}
+	return fmt.Sprintf("%s", strings.Join(messages, "; "))
 }
