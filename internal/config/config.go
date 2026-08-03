@@ -60,6 +60,16 @@ func Load(name string) (SlotConfig, error) {
 	}
 
 	path := filepath.Join(Directory(), name+".json")
+	info, err := os.Lstat(path)
+	if err != nil {
+		return SlotConfig{}, fmt.Errorf("inspect configuration %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return SlotConfig{}, fmt.Errorf("configuration %s must be a regular file, not a symbolic link", path)
+	}
+	if !info.Mode().IsRegular() {
+		return SlotConfig{}, fmt.Errorf("configuration %s must be a regular file", path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return SlotConfig{}, fmt.Errorf("read configuration %s: %w", path, err)

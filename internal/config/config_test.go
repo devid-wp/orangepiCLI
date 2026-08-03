@@ -54,3 +54,33 @@ func TestRequireAllowedRejectsPath(t *testing.T) {
 		t.Fatal("expected path-like slot name to be rejected")
 	}
 }
+
+func TestLoadRejectsDirectory(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(ConfigDirEnv, directory)
+	if err := os.Mkdir(filepath.Join(directory, "slot1.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load("slot1")
+	if err == nil || !strings.Contains(err.Error(), "must be a regular file") {
+		t.Fatalf("expected non-regular-file error, got %v", err)
+	}
+}
+
+func TestLoadRejectsSymbolicLink(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(ConfigDirEnv, directory)
+	target := filepath.Join(directory, "target.json")
+	if err := os.WriteFile(target, []byte(`{"slot":"slot1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(directory, "slot1.json")); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+
+	_, err := Load("slot1")
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected symbolic-link error, got %v", err)
+	}
+}
