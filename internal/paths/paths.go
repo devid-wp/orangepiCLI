@@ -44,6 +44,9 @@ func Ensure() error {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return fmt.Errorf("create directory %s: %w", directory, err)
 		}
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return fmt.Errorf("secure directory %s: %w", directory, err)
+		}
 	}
 	return nil
 }

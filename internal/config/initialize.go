@@ -70,6 +70,9 @@ func writeConfigAtomically(path string, slot SlotConfig) (err error) {
 			_ = os.Remove(temporaryPath)
 		}
 	}()
+	if err := file.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure temporary configuration for %s: %w", path, err)
+	}
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")

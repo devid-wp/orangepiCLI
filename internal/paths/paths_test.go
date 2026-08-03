@@ -1,7 +1,9 @@
 package paths
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -18,6 +20,38 @@ func TestExplicitDirectoriesTakePriority(t *testing.T) {
 	}
 	if got := StateDir(); got != stateDir {
 		t.Fatalf("StateDir() = %q, want %q", got, stateDir)
+	}
+}
+
+func TestEnsureSecuresApplicationDirectories(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
+
+	configDir := filepath.Join(t.TempDir(), "config")
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv(ConfigDirEnv, configDir)
+	t.Setenv(StateDirEnv, stateDir)
+	for _, directory := range []string{configDir, stateDir} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{configDir, stateDir, PIDDir(), LogDir()} {
+		info, err := os.Stat(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("directory %q mode = %o, want 700", directory, got)
+		}
 	}
 }
 
