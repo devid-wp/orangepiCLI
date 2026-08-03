@@ -52,3 +52,36 @@ func TestValidateEnvFileRejectsUnsafePermissions(t *testing.T) {
 		t.Fatalf("Validate() = %v, want unsafe-permissions error", errors)
 	}
 }
+
+func TestValidateRejectsWhitespaceOnlyRequiredFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(*SlotConfig)
+		want  string
+	}{
+		{
+			name: "working directory",
+			apply: func(slot *SlotConfig) {
+				slot.WorkingDirectory = " \t\n"
+			},
+			want: "missing working_directory",
+		},
+		{
+			name: "start command",
+			apply: func(slot *SlotConfig) {
+				slot.StartCommand = " \t\n"
+			},
+			want: "missing start_command",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			slot := enabledSlot(t)
+			test.apply(&slot)
+			if errors := Validate(slot); !slices.Contains(errors, test.want) {
+				t.Fatalf("Validate() = %v, want %q", errors, test.want)
+			}
+		})
+	}
+}
