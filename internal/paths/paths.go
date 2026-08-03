@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -41,7 +42,7 @@ func LogDir() string {
 func Ensure() error {
 	for _, directory := range []string{ConfigDir(), StateDir(), PIDDir(), LogDir()} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
-			return err
+			return fmt.Errorf("create directory %s: %w", directory, err)
 		}
 	}
 	return nil

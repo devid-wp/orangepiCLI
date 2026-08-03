@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,8 +51,8 @@ func TestLoadRejectsMismatchedSlot(t *testing.T) {
 }
 
 func TestRequireAllowedRejectsPath(t *testing.T) {
-	if err := RequireAllowed("../slot1"); err == nil {
-		t.Fatal("expected path-like slot name to be rejected")
+	if err := RequireAllowed("../slot1"); !errors.Is(err, ErrInvalidSlot) {
+		t.Fatalf("expected invalid-slot error, got %v", err)
 	}
 }
 
@@ -63,7 +64,7 @@ func TestLoadRejectsDirectory(t *testing.T) {
 	}
 
 	_, err := Load("slot1")
-	if err == nil || !strings.Contains(err.Error(), "must be a regular file") {
+	if !errors.Is(err, ErrUnsafeConfigFile) || !strings.Contains(err.Error(), "must be a regular file") {
 		t.Fatalf("expected non-regular-file error, got %v", err)
 	}
 }
@@ -80,7 +81,7 @@ func TestLoadRejectsSymbolicLink(t *testing.T) {
 	}
 
 	_, err := Load("slot1")
-	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+	if !errors.Is(err, ErrUnsafeConfigFile) || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("expected symbolic-link error, got %v", err)
 	}
 }

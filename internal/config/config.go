@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,12 @@ import (
 )
 
 const ConfigDirEnv = paths.ConfigDirEnv
+
+var (
+	ErrInvalidSlot        = errors.New("invalid slot")
+	ErrInvalidConfig      = errors.New("invalid configuration")
+	ErrUnsafeConfigFile   = errors.New("unsafe configuration file")
+)
 
 var AllowedSlots = []string{
 	"slot1", "slot2", "slot3", "slot4", "slot5",
@@ -45,7 +52,7 @@ func IsAllowed(name string) bool {
 
 func RequireAllowed(name string) error {
 	if !IsAllowed(name) {
-		return fmt.Errorf("slot %q does not exist; available slots: %s", name, strings.Join(AllowedSlots, ", "))
+		return fmt.Errorf("%w: slot %q does not exist; available slots: %s", ErrInvalidSlot, name, strings.Join(AllowedSlots, ", "))
 	}
 	return nil
 }
@@ -56,7 +63,7 @@ func Directory() string {
 
 func Load(name string) (SlotConfig, error) {
 	if err := RequireAllowed(name); err != nil {
-		return SlotConfig{}, err
+		return SlotConfig{}, fmt.Errorf("load configuration: %w", err)
 	}
 
 	path := filepath.Join(Directory(), name+".json")
@@ -65,10 +72,10 @@ func Load(name string) (SlotConfig, error) {
 		return SlotConfig{}, fmt.Errorf("inspect configuration %s: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return SlotConfig{}, fmt.Errorf("configuration %s must be a regular file, not a symbolic link", path)
+		return SlotConfig{}, fmt.Errorf("%w: configuration %s must be a regular file, not a symbolic link", ErrUnsafeConfigFile, path)
 	}
 	if !info.Mode().IsRegular() {
-		return SlotConfig{}, fmt.Errorf("configuration %s must be a regular file", path)
+		return SlotConfig{}, fmt.Errorf("%w: configuration %s must be a regular file", ErrUnsafeConfigFile, path)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -79,13 +86,16 @@ func Load(name string) (SlotConfig, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&slot); err != nil {
-		return SlotConfig{}, fmt.Errorf("invalid JSON in %s: %w", path, err)
+		return SlotConfig{}, fmt.Errorf("%w: invalid JSON in %s: %w", ErrInvalidConfig, path, err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return SlotConfig{}, fmt.Errorf("invalid JSON in %s: unexpected data after JSON object", path)
+		if err != nil {
+			return SlotConfig{}, fmt.Errorf("%w: invalid JSON in %s: unexpected data after JSON object: %w", ErrInvalidConfig, path, err)
+		}
+		return SlotConfig{}, fmt.Errorf("%w: invalid JSON in %s: unexpected data after JSON object", ErrInvalidConfig, path)
 	}
 	if slot.Slot != name {
-		return SlotConfig{}, fmt.Errorf("field %q in %s must be %q", "slot", path, name)
+		return SlotConfig{}, fmt.Errorf("%w: field %q in %s must be %q", ErrInvalidConfig, "slot", path, name)
 	}
 	if slot.Environment == nil {
 		slot.Environment = map[string]string{}
