@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -25,8 +26,11 @@ func Validate(slot SlotConfig) []string {
 		}
 	}
 	if slot.EnvFile != "" {
-		if info, err := os.Stat(slot.EnvFile); err != nil || info.IsDir() {
+		info, err := os.Lstat(slot.EnvFile)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			errors = append(errors, "env_file does not exist")
+		} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+			errors = append(errors, "env_file has unsafe permissions")
 		}
 	}
 	return errors
