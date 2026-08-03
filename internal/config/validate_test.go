@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -111,5 +112,39 @@ func TestValidateEnvironmentKeys(t *testing.T) {
 				t.Fatalf("Validate() = %v, invalid key = %t, want %t", errors, gotInvalid, test.invalid)
 			}
 		})
+	}
+}
+
+func TestValidationErrorsDoNotExposeEnvironmentSecrets(t *testing.T) {
+	const secret = "do-not-leak-this-secret"
+	slot := enabledSlot(t)
+	slot.Environment = map[string]string{
+		"INVALID=" + secret: secret,
+	}
+	slot.EnvFile = filepath.Join(t.TempDir(), "missing.env")
+
+	formatted := FormatErrors(Validate(slot))
+	if strings.Contains(formatted, secret) {
+		t.Fatalf("validation error exposed environment secret: %q", formatted)
+	}
+}
+
+func TestValidationErrorsDoNotExposeEnvFileContents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unsafe Unix permissions are not represented on Windows")
+	}
+	const secret = "env-file-secret-value"
+	slot := enabledSlot(t)
+	slot.EnvFile = filepath.Join(t.TempDir(), "secrets.env")
+	if err := os.WriteFile(slot.EnvFile, []byte("TOKEN="+secret+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(slot.EnvFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	formatted := FormatErrors(Validate(slot))
+	if strings.Contains(formatted, secret) {
+		t.Fatalf("validation error exposed env_file contents: %q", formatted)
 	}
 }
