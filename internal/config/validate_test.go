@@ -176,3 +176,108 @@ func TestValidationErrorsDoNotExposeEnvFileContents(t *testing.T) {
 		t.Fatalf("validation error exposed env_file contents: %q", formatted)
 	}
 }
+
+func TestValidateLogFileAcceptsExistingRegularFile(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.LogFile = filepath.Join(t.TempDir(), "slot.log")
+	if err := os.WriteFile(slot.LogFile, []byte("ready\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if errors := Validate(slot); containsValidationMessage(errors, "log_file does not exist") {
+		t.Fatalf("Validate() = %v, want no log_file error", errors)
+	}
+}
+
+func TestValidateLogFileAcceptsMissingFileWithExistingParent(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.LogFile = filepath.Join(t.TempDir(), "slot.log")
+	if errors := Validate(slot); containsValidationMessage(errors, "log_file does not exist") {
+		t.Fatalf("Validate() = %v, want no log_file error", errors)
+	}
+}
+
+func TestValidateLogFileRejectsMissingParentDirectory(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.LogFile = filepath.Join(t.TempDir(), "missing", "logs", "slot.log")
+	if errors := Validate(slot); !containsValidationMessage(errors, "log_file does not exist") {
+		t.Fatalf("Validate() = %v, want missing log_file error", errors)
+	}
+}
+
+func TestValidateLogFileRejectsDirectory(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.LogFile = t.TempDir()
+	if errors := Validate(slot); !containsValidationMessage(errors, "log_file does not exist") {
+		t.Fatalf("Validate() = %v, want directory rejection", errors)
+	}
+}
+
+func TestValidateLogFileRejectsSymbolicLink(t *testing.T) {
+	slot := enabledSlot(t)
+	directory := t.TempDir()
+	target := filepath.Join(directory, "real.log")
+	if err := os.WriteFile(target, []byte("ready\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "linked.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+	slot.LogFile = link
+
+	if errors := Validate(slot); !containsValidationMessage(errors, "log_file does not exist") {
+		t.Fatalf("Validate() = %v, want symbolic-link rejection", errors)
+	}
+}
+
+func TestOpenLogFileCreatesFileWithSecurePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
+	path := filepath.Join(t.TempDir(), "logs", "slot.log")
+	file, err := OpenLogFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { file.Close() })
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("log_file mode = %o, want 0o600", perm)
+	}
+}
+
+func TestOpenLogFileRejectsSymbolicLink(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "real.log")
+	if err := os.WriteFile(target, []byte("ready\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "linked.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+
+	if _, err := OpenLogFile(link); err == nil {
+		t.Fatal("OpenLogFile() returned no error for a symbolic link")
+	}
+}
+
+func TestOpenLogFileRejectsDirectory(t *testing.T) {
+	if _, err := OpenLogFile(t.TempDir()); err == nil {
+		t.Fatal("OpenLogFile() returned no error for a directory")
+	}
+}
+
+func TestOpenLogFileEmptyPathReturnsStdout(t *testing.T) {
+	file, err := OpenLogFile("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file != os.Stdout {
+		t.Fatalf("OpenLogFile(\"\") = %v, want os.Stdout", file)
+	}
+}
