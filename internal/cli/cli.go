@@ -17,6 +17,17 @@ Usage:
   orangectl help
 `
 
+// exitUsageError is returned when the user invokes the CLI incorrectly:
+// unknown command, too many arguments, or a disallowed slot name. It must
+// be paired with reportUsageError so stderr carries the message and the
+// usage hint.
+const exitUsageError = 2
+
+// exitOperationError is returned when a command fails because of an
+// operational condition: configuration that cannot be loaded, filesystem
+// permissions, and so on. It must be paired with reportOperationError.
+const exitOperationError = 1
+
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage)
@@ -29,49 +40,69 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "list":
 		if len(args) != 1 {
-			return usageError(stderr, "list does not accept arguments")
+			return reportUsageError(stderr, "list does not accept arguments")
 		}
-		return list(stdout)
+		return list(stdout, stderr)
 	case "init":
 		if len(args) != 1 {
-			return usageError(stderr, "init does not accept arguments")
+			return reportUsageError(stderr, "init does not accept arguments")
 		}
 		return initialize(stdout, stderr)
 	case "validate":
 		if len(args) > 2 {
-			return usageError(stderr, "validate accepts at most one slot")
+			return reportUsageError(stderr, "validate accepts at most one slot")
 		}
 		name := ""
 		if len(args) == 2 {
 			name = args[1]
 			if err := config.RequireAllowed(name); err != nil {
-				fmt.Fprintf(stderr, "Error: %v\n", err)
-				return 2
+				return reportUsageError(stderr, err.Error())
 			}
 		}
 		return validate(stdout, name)
 	default:
-		return usageError(stderr, fmt.Sprintf("unknown command %q", args[0]))
+		return reportUsageError(stderr, fmt.Sprintf("unknown command %q", args[0]))
 	}
+}
+
+// reportOperationError prints an operational error to stderr and returns
+// the operation-exit code. Every operational error message must flow
+// through this helper so the "Error: " prefix and the stderr destination
+// stay consistent.
+func reportOperationError(stderr io.Writer, err error) int {
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintf(stderr, "Error: %s\n", err.Error())
+	return exitOperationError
+}
+
+// reportOperationMessage is the same as reportOperationError but accepts a
+// pre-formatted message instead of an error value. Use it when the error
+// has been augmented with context (e.g. the slot name that failed to load).
+func reportOperationMessage(stderr io.Writer, format string, args ...any) int {
+	fmt.Fprintf(stderr, "Error: "+format+"\n", args...)
+	return exitOperationError
+}
+
+// reportUsageError prints a usage error to stderr (followed by the usage
+// hint on a new line) and returns the usage-exit code.
+func reportUsageError(stderr io.Writer, message string) int {
+	fmt.Fprintf(stderr, "Error: %s\n\n%s", message, usage)
+	return exitUsageError
 }
 
 func initialize(stdout, stderr io.Writer) int {
 	result, err := config.Initialize()
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		return reportOperationError(stderr, err)
 	}
 	fmt.Fprintf(stdout, "Initialized OrangeCTL: %d created, %d kept\n", len(result.Created), len(result.Existing))
 	fmt.Fprintf(stdout, "Config directory: %s\n", config.Directory())
 	return 0
 }
 
-func usageError(stderr io.Writer, message string) int {
-	fmt.Fprintf(stderr, "Error: %s\n\n%s", message, usage)
-	return 2
-}
-
-func list(stdout io.Writer) int {
+func list(stdout, stderr io.Writer) int {
 	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "SLOT\tNAME\tENABLED\tSTATUS")
 	failed := false
@@ -79,7 +110,8 @@ func list(stdout io.Writer) int {
 		slot, err := config.Load(name)
 		if err != nil {
 			failed = true
-			fmt.Fprintf(w, "%s\t-\t-\tconfig error\n", name)
+			fmt.Fprintf(w, "%s\t-\t-\terror\n", name)
+			reportOperationMessage(stderr, "failed to load slot %q: %s", name, err.Error())
 			continue
 		}
 		enabled, status := "no", "disabled"
@@ -90,7 +122,7 @@ func list(stdout io.Writer) int {
 	}
 	w.Flush()
 	if failed {
-		return 1
+		return exitOperationError
 	}
 	return 0
 }
@@ -117,7 +149,7 @@ func validate(stdout io.Writer, requested string) int {
 	}
 	w.Flush()
 	if failed {
-		return 1
+		return exitOperationError
 	}
 	return 0
 }
