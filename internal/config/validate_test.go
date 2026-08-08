@@ -17,6 +17,15 @@ func containsValidationMessage(validationErrors ValidationErrors, message string
 	return false
 }
 
+func containsValidationField(validationErrors ValidationErrors, field string) bool {
+	for _, validationError := range validationErrors {
+		if validationError.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
 func enabledSlot(t *testing.T) SlotConfig {
 	t.Helper()
 	return SlotConfig{
@@ -25,6 +34,175 @@ func enabledSlot(t *testing.T) SlotConfig {
 		WorkingDirectory: t.TempDir(),
 		StartCommand:     "run",
 		Environment:      map[string]string{},
+	}
+}
+
+func TestValidateDisabledSlotRequiresNoFields(t *testing.T) {
+	slot := SlotConfig{
+		Slot:             "slot1",
+		Enabled:          false,
+		WorkingDirectory: "",
+		StartCommand:     "",
+		LogFile:          "/no/such/path/slot.log",
+		Environment:      map[string]string{"API_TOKEN": "value"},
+	}
+	if errors := Validate(slot); len(errors) != 0 {
+		t.Fatalf("Validate() = %v, want no errors for disabled slot", errors)
+	}
+}
+
+func TestValidateDisabledSlotStillReportsEnvironmentKeys(t *testing.T) {
+	slot := SlotConfig{
+		Enabled:     false,
+		Environment: map[string]string{"1INVALID": "value"},
+	}
+	errors := Validate(slot)
+	if len(errors) != 1 || errors[0].Field != "environment" {
+		t.Fatalf("Validate() = %v, want single environment error", errors)
+	}
+}
+
+func TestValidateWorkingDirectoryMissing(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.WorkingDirectory = ""
+
+	errors := Validate(slot)
+	if !containsValidationField(errors, "working_directory") ||
+		!containsValidationMessage(errors, "missing working_directory") {
+		t.Fatalf("Validate() = %v, want missing working_directory error", errors)
+	}
+}
+
+func TestValidateWorkingDirectoryNotADirectory(t *testing.T) {
+	slot := enabledSlot(t)
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	slot.WorkingDirectory = file
+
+	errors := Validate(slot)
+	if !containsValidationMessage(errors, "invalid working_directory") {
+		t.Fatalf("Validate() = %v, want invalid working_directory error", errors)
+	}
+}
+
+func TestValidateStartCommandMissing(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.StartCommand = ""
+
+	errors := Validate(slot)
+	if !containsValidationMessage(errors, "missing start_command") {
+		t.Fatalf("Validate() = %v, want missing start_command error", errors)
+	}
+}
+
+func TestValidateLogFileEmptyIsAllowed(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.LogFile = ""
+
+	if errors := Validate(slot); containsValidationField(errors, "log_file") {
+		t.Fatalf("Validate() = %v, want no log_file error", errors)
+	}
+}
+
+func TestValidateEnvFileMissing(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.EnvFile = filepath.Join(t.TempDir(), "missing.env")
+
+	errors := Validate(slot)
+	if !containsValidationMessage(errors, "env_file does not exist") {
+		t.Fatalf("Validate() = %v, want env_file missing error", errors)
+	}
+}
+
+func TestValidateEnvFileRejectsDirectory(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.EnvFile = t.TempDir()
+
+	if errors := Validate(slot); !containsValidationMessage(errors, "env_file does not exist") {
+		t.Fatalf("Validate() = %v, want env_file directory rejection", errors)
+	}
+}
+
+func TestValidateEnvFileAcceptsSafePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
+	slot := enabledSlot(t)
+	slot.EnvFile = filepath.Join(t.TempDir(), "secrets.env")
+	if err := os.WriteFile(slot.EnvFile, []byte("TOKEN=secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(slot.EnvFile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if errors := Validate(slot); containsValidationMessage(errors, "env_file has unsafe permissions") {
+		t.Fatalf("Validate() = %v, want no unsafe-permissions error", errors)
+	}
+}
+
+func TestValidationCodesAreStructured(t *testing.T) {
+	slot := enabledSlot(t)
+	slot.WorkingDirectory = ""
+	slot.StartCommand = ""
+	slot.Environment = map[string]string{"1INVALID": "value"}
+	slot.EnvFile = filepath.Join(t.TempDir(), "missing.env")
+	slot.LogFile = filepath.Join(t.TempDir(), "missing", "logs", "slot.log")
+
+	errors := Validate(slot)
+	codes := make(map[string]ValidationCode, len(errors))
+	for _, validationError := range errors {
+		codes[validationError.Field] = validationError.Code
+	}
+
+	want := map[string]ValidationCode{
+		"environment":       CodeInvalid,
+		"working_directory": CodeMissing,
+		"start_command":     CodeMissing,
+		"env_file":          CodeNotFound,
+		"log_file":          CodeNotFound,
+	}
+	if len(codes) != len(want) {
+		t.Fatalf("Validate() = %+v, want %d entries", errors, len(want))
+	}
+	for field, wantCode := range want {
+		got, ok := codes[field]
+		if !ok {
+			t.Fatalf("Validate() missing field %q in %+v", field, errors)
+		}
+		if got != wantCode {
+			t.Fatalf("codes[%s] = %s, want %s", field, got, wantCode)
+		}
+	}
+}
+
+func TestValidationCodeForEnvFileUnsafePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
+	slot := enabledSlot(t)
+	slot.EnvFile = filepath.Join(t.TempDir(), "secrets.env")
+	if err := os.WriteFile(slot.EnvFile, []byte("TOKEN=secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(slot.EnvFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	errors := Validate(slot)
+	var found *ValidationError
+	for i := range errors {
+		if errors[i].Field == "env_file" {
+			found = &errors[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("Validate() = %+v, want env_file entry", errors)
+	}
+	if found.Code != CodeUnsafePermissions {
+		t.Fatalf("env_file code = %s, want %s", found.Code, CodeUnsafePermissions)
 	}
 }
 
