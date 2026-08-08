@@ -7,15 +7,23 @@ import (
 	"text/tabwriter"
 
 	"github.com/devid-wp/orangepiCLI/internal/config"
+	"github.com/devid-wp/orangepiCLI/internal/term"
 )
 
 const usage = `OrangeCTL manages ten universal process slots on Orange Pi.
 
 Usage:
-  orangectl [--json] init
-  orangectl [--json] list
-  orangectl [--json] validate [slot1..slot10]
-  orangectl [--json] help
+  orangectl [--json] [--no-color] init
+  orangectl [--json] [--no-color] list
+  orangectl [--json] [--no-color] validate [slot1..slot10]
+  orangectl [--json] [--no-color] help
+
+Global flags:
+  --json       Emit machine-readable JSON on stdout.
+  --no-color   Disable ANSI colour escapes. Respects NO_COLOR and TERM=dumb.
+
+Each command's exit code is 0 on success, 1 on operational failure, and 2
+on usage errors (unknown command, bad arguments, unknown slot).
 `
 
 // exitUsageError is returned when the user invokes the CLI incorrectly:
@@ -34,6 +42,7 @@ const exitOperationError = 1
 // dispatcher consults args[0].
 type globalOptions struct {
 	jsonOutput bool
+	noColor    bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -46,6 +55,8 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 		switch arg {
 		case "--json", "-json":
 			opts.jsonOutput = true
+		case "--no-color", "-no-color":
+			opts.noColor = true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
@@ -56,6 +67,15 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 		}
 	}
 	return cleaned, opts, nil
+}
+
+// shouldColor centralises the term.Options construction so every command
+// receives a consistent decision based on the global flags.
+func (opts globalOptions) shouldColor(stdout io.Writer) bool {
+	return term.ShouldColor(stdout, term.Options{
+		NoColorFlag: opts.noColor,
+		JSONOutput:  opts.jsonOutput,
+	})
 }
 
 // jsonInitResult is the --json shape of `orangectl init`.
@@ -240,12 +260,12 @@ func list(stdout, stderr io.Writer, opts globalOptions) int {
 	if opts.jsonOutput {
 		return listJSON(stdout, stderr)
 	}
-	return listText(stdout, stderr)
+	return listText(stdout, stderr, opts.shouldColor(stdout))
 }
 
 // listText prints the human-readable table and writes per-slot load
 // failures to stderr.
-func listText(stdout, stderr io.Writer) int {
+func listText(stdout, stderr io.Writer, useColor bool) int {
 	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "SLOT\tNAME\tENABLED\tSTATUS")
 	failed := false
@@ -253,7 +273,7 @@ func listText(stdout, stderr io.Writer) int {
 		slot, err := config.Load(name)
 		if err != nil {
 			failed = true
-			fmt.Fprintf(w, "%s\t-\t-\terror\n", name)
+			fmt.Fprintf(w, "%s\t-\t-\t%s\n", name, term.Red(useColor, "error"))
 			reportOperationMessage(stderr, "failed to load slot %q: %s", name, err.Error())
 			continue
 		}
@@ -261,6 +281,8 @@ func listText(stdout, stderr io.Writer) int {
 		if slot.Enabled {
 			enabled, status = "yes", "stopped"
 		}
+		enabled = term.Bold(useColor, enabled)
+		status = paintStatus(useColor, status)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, slot.DisplayName, enabled, status)
 	}
 	w.Flush()
@@ -316,10 +338,10 @@ func validate(stdout io.Writer, requested string, opts globalOptions) int {
 	if opts.jsonOutput {
 		return validateJSON(stdout, targets)
 	}
-	return validateText(stdout, targets)
+	return validateText(stdout, targets, opts.shouldColor(stdout))
 }
 
-func validateText(stdout io.Writer, targets []string) int {
+func validateText(stdout io.Writer, targets []string, useColor bool) int {
 	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "SLOT\tRESULT")
 	failed := false
@@ -332,7 +354,7 @@ func validateText(stdout io.Writer, targets []string) int {
 		} else if !slot.Enabled {
 			result = "disabled"
 		}
-		fmt.Fprintf(w, "%s\t%s\n", name, result)
+		fmt.Fprintf(w, "%s\t%s\n", name, paintValidateResult(useColor, result, len(validationErrors) > 0))
 	}
 	w.Flush()
 	if failed {
@@ -373,4 +395,43 @@ func validateJSON(stdout io.Writer, targets []string) int {
 		return exitOperationError
 	}
 	return 0
+}
+
+// paintStatus colours the STATUS column of `list` based on the slot's
+// lifecycle state. "stopped" gets green, "disabled" gets dim grey, and
+// "error" is red. The mapping is intentionally narrow — only the words
+// that already appear in the column are coloured.
+func paintStatus(useColor bool, status string) string {
+	if !useColor {
+		return status
+	}
+	switch status {
+	case "stopped":
+		return term.Green(true, status)
+	case "disabled":
+		return term.Dim(true, status)
+	default:
+		return status
+	}
+}
+
+// paintValidateResult colours the RESULT column of `validate`. A clean
+// "OK" is green; "disabled" is dim; anything else (a validation error
+// description) is printed in red. Errors always render the actual error
+// text — colour is a layer on top, never a replacement.
+func paintValidateResult(useColor bool, result string, hasErrors bool) string {
+	if !useColor {
+		return result
+	}
+	if hasErrors {
+		return term.Red(true, result)
+	}
+	switch result {
+	case "OK":
+		return term.Green(true, result)
+	case "disabled":
+		return term.Dim(true, result)
+	default:
+		return result
+	}
 }

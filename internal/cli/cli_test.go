@@ -353,3 +353,113 @@ func TestJSONHelpShape(t *testing.T) {
 		t.Fatalf("usage missing 'orangectl validate': %q", got.Usage)
 	}
 }
+
+const ansiEscape = "\033["
+
+func TestRunAcceptsNoColorFlag(t *testing.T) {
+	// The --no-color flag must be accepted in any position and must not
+	// inject ANSI escapes into stdout. bytes.Buffer is non-TTY, so the
+	// absence of escapes is the only invariant we can assert here; the
+	// "yes, escapes would appear with a TTY" branch is covered by the
+	// term package's own tests.
+	configDir := t.TempDir()
+	t.Setenv(config.ConfigDirEnv, configDir)
+	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("flag before command", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"--no-color", "list"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), ansiEscape) {
+			t.Fatalf("stdout should not contain ANSI escapes: %q", stdout.String())
+		}
+	})
+
+	t.Run("flag after command", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"list", "--no-color"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), ansiEscape) {
+			t.Fatalf("stdout should not contain ANSI escapes: %q", stdout.String())
+		}
+	})
+}
+
+func TestRunJSONOutputNeverContainsANSI(t *testing.T) {
+	// The JSON encoder must never emit colour escapes, regardless of the
+	// --no-color flag. We check every command that produces a JSON
+	// payload.
+	configDir := t.TempDir()
+	t.Setenv(config.ConfigDirEnv, configDir)
+	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "list", args: []string{"list", "--json"}},
+		{name: "validate", args: []string{"validate", "--json"}},
+		{name: "help", args: []string{"help", "--json"}},
+		{name: "no-command", args: []string{"--json"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := Run(test.args, &stdout, &stderr); code != 0 {
+				t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+			}
+			if strings.Contains(stdout.String(), ansiEscape) {
+				t.Fatalf("stdout should not contain ANSI escapes: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunHonoursNO_COLOREnv(t *testing.T) {
+	// When NO_COLOR is set, even a command that would otherwise print
+	// colour (we cannot simulate a TTY here, so we only assert the
+	// cheaper invariant: the absence of escapes on stdout).
+	t.Setenv("NO_COLOR", "1")
+
+	configDir := t.TempDir()
+	t.Setenv(config.ConfigDirEnv, configDir)
+	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), ansiEscape) {
+		t.Fatalf("stdout should not contain ANSI escapes when NO_COLOR is set: %q", stdout.String())
+	}
+}
+
+func TestRunHonoursTERMDumb(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+
+	configDir := t.TempDir()
+	t.Setenv(config.ConfigDirEnv, configDir)
+	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), ansiEscape) {
+		t.Fatalf("stdout should not contain ANSI escapes when TERM=dumb: %q", stdout.String())
+	}
+}
