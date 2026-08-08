@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -84,4 +85,128 @@ func TestLoadRejectsSymbolicLink(t *testing.T) {
 	if !errors.Is(err, ErrUnsafeConfigFile) || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("expected symbolic-link error, got %v", err)
 	}
+}
+
+func TestLoadRejectsBrokenJSON(t *testing.T) {
+	writeConfig(t, "slot1", `{"slot":"slot1"`)
+
+	_, err := Load("slot1")
+	if err == nil {
+		t.Fatal("Load() returned no error for broken JSON")
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+	}
+	var syntaxError *json.SyntaxError
+	if !errors.As(err, &syntaxError) {
+		t.Fatalf("Load() error = %v, want wrapped json.SyntaxError", err)
+	}
+}
+
+func TestLoadRejectsTrailingData(t *testing.T) {
+	writeConfig(t, "slot1", `{"slot":"slot1"}{"slot":"slot2"}`)
+
+	_, err := Load("slot1")
+	if err == nil {
+		t.Fatal("Load() returned no error for trailing JSON data")
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+	}
+	if !strings.Contains(err.Error(), "unexpected data after JSON object") {
+		t.Fatalf("Load() error = %v, want trailing-data message", err)
+	}
+}
+
+func TestLoadMissingConfig(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(ConfigDirEnv, directory)
+
+	_, err := Load("slot1")
+	if err == nil {
+		t.Fatal("Load() returned no error for missing configuration")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load() error = %v, want os.ErrNotExist", err)
+	}
+	if errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Load() error = %v, must not be classified as ErrInvalidConfig", err)
+	}
+}
+
+// TestLoadErrorClassification enumerates every failure path of Load and
+// asserts the expected sentinel via errors.Is. Each subtest is independent
+// and uses its own temporary configuration directory.
+func TestLoadErrorClassification(t *testing.T) {
+	t.Run("path traversal", func(t *testing.T) {
+		err := RequireAllowed("../slot1")
+		if !errors.Is(err, ErrInvalidSlot) {
+			t.Fatalf("RequireAllowed() = %v, want ErrInvalidSlot", err)
+		}
+	})
+
+	t.Run("broken JSON", func(t *testing.T) {
+		writeConfig(t, "slot1", `{`)
+		_, err := Load("slot1")
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+		}
+	})
+
+	t.Run("trailing data", func(t *testing.T) {
+		writeConfig(t, "slot1", `{"slot":"slot1"}{"slot":"slot2"}`)
+		_, err := Load("slot1")
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+		}
+	})
+
+	t.Run("slot mismatch", func(t *testing.T) {
+		writeConfig(t, "slot1", `{"slot":"slot2"}`)
+		_, err := Load("slot1")
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+		}
+	})
+
+	t.Run("directory", func(t *testing.T) {
+		directory := t.TempDir()
+		t.Setenv(ConfigDirEnv, directory)
+		if err := os.Mkdir(filepath.Join(directory, "slot1.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load("slot1")
+		if !errors.Is(err, ErrUnsafeConfigFile) {
+			t.Fatalf("Load() error = %v, want ErrUnsafeConfigFile", err)
+		}
+	})
+
+	t.Run("symbolic link", func(t *testing.T) {
+		directory := t.TempDir()
+		t.Setenv(ConfigDirEnv, directory)
+		target := filepath.Join(directory, "target.json")
+		if err := os.WriteFile(target, []byte(`{"slot":"slot1"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(directory, "slot1.json")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symbolic links are unavailable: %v", err)
+		}
+		_, err := Load("slot1")
+		if !errors.Is(err, ErrUnsafeConfigFile) {
+			t.Fatalf("Load() error = %v, want ErrUnsafeConfigFile", err)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		directory := t.TempDir()
+		t.Setenv(ConfigDirEnv, directory)
+		_, err := Load("slot1")
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Load() error = %v, want os.ErrNotExist", err)
+		}
+		if errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("Load() error = %v, must not be classified as ErrInvalidConfig", err)
+		}
+	})
 }
