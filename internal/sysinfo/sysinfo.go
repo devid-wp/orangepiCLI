@@ -4,8 +4,23 @@ package sysinfo
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
+
+// Temperature returns Celsius from a Linux thermal zone, or "unavailable".
+func Temperature(source Source) (string, error) {
+	data, err := source.ReadFile("/sys/class/thermal/thermal_zone0/temp")
+	if err != nil {
+		return "unavailable", nil
+	}
+	milli, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+	if err != nil {
+		return "unavailable", nil
+	}
+	return fmt.Sprintf("%.1f°C", milli/1000), nil
+}
 
 type Source interface {
 	Hostname() (string, error)
