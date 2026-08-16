@@ -2,7 +2,7 @@
 package logview
 
 import (
-	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -37,19 +37,37 @@ func LastLines(path string, count int) ([]string, error) {
 		return nil, err
 	}
 	defer file.Close()
-	lines := make([]string, 0, count)
-	scanner := bufio.NewScanner(file)
-	buffer := make([]byte, 64*1024)
-	scanner.Buffer(buffer, 1024*1024)
-	for scanner.Scan() {
-		if len(lines) == count {
-			copy(lines, lines[1:])
-			lines = lines[:count-1]
-		}
-		lines = append(lines, scanner.Text())
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat log file: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read log file: %w", err)
+	const blockSize int64 = 32 * 1024
+	var data []byte
+	offset := info.Size()
+	breaks := 0
+	for offset > 0 && breaks <= count {
+		size := blockSize
+		if offset < size {
+			size = offset
+		}
+		offset -= size
+		block := make([]byte, size)
+		if _, err := file.ReadAt(block, offset); err != nil {
+			return nil, fmt.Errorf("read log file: %w", err)
+		}
+		breaks += bytes.Count(block, []byte{'\n'})
+		data = append(block, data...)
+	}
+	parts := bytes.Split(data, []byte{'\n'})
+	if len(parts) > 0 && len(parts[len(parts)-1]) == 0 {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) > count {
+		parts = parts[len(parts)-count:]
+	}
+	lines := make([]string, len(parts))
+	for i := range parts {
+		lines[i] = string(parts[i])
 	}
 	return lines, nil
 }
