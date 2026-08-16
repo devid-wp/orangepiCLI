@@ -15,6 +15,7 @@ import (
 	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
 	"github.com/devid-wp/orangepiCLI/internal/logview"
+	"github.com/devid-wp/orangepiCLI/internal/menu"
 	"github.com/devid-wp/orangepiCLI/internal/process"
 	"github.com/devid-wp/orangepiCLI/internal/sysinfo"
 	"github.com/devid-wp/orangepiCLI/internal/term"
@@ -33,6 +34,7 @@ Usage:
   orangectl [--json] [--no-color] [--lines N] [--follow] logs <slot1..slot10>
   orangectl edit <slot1..slot10>
   orangectl system
+  orangectl menu
   orangectl --yes reset <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
@@ -249,7 +251,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return reportUsageError(stderr, err.Error())
 	}
 	if len(cleaned) == 0 {
-		// No command: behave like before (print usage), honour --json.
+		if !opts.jsonOutput {
+			return menu.Run(os.Stdin, stdout, func(args []string) int { return Run(args, stdout, stderr) })
+		}
 		if opts.jsonOutput {
 			return writeJSON(stdout, jsonHelpResult{Commands: commandSummaries, Usage: usage})
 		}
@@ -267,6 +271,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch cleaned[0] {
+	case "menu":
+		if len(cleaned) != 1 {
+			return reportUsageError(stderr, "menu does not accept arguments")
+		}
+		return menu.Run(os.Stdin, stdout, func(args []string) int { return Run(args, stdout, stderr) })
 	case "help", "-h", "--help":
 		return help(stdout, opts)
 	case "list":
