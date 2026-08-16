@@ -171,6 +171,19 @@ func (manager Manager) ForceStop(slot config.SlotConfig) error {
 	return manager.stop(slot, true)
 }
 
+// Restart first proves and stops the old process. A configured restart_command
+// becomes the command for the new tracked process; otherwise start_command is
+// used. In both cases a fresh PID identity is persisted by Start.
+func (manager Manager) Restart(slot config.SlotConfig) (ProcessState, error) {
+	if err := manager.Stop(slot); err != nil {
+		return ProcessState{}, err
+	}
+	if slot.RestartCommand != "" {
+		slot.StartCommand = slot.RestartCommand
+	}
+	return manager.Start(slot)
+}
+
 func (manager Manager) stop(slot config.SlotConfig, force bool) error {
 	if err := manager.valid(); err != nil {
 		return err

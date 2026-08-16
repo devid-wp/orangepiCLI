@@ -23,6 +23,7 @@ Usage:
   orangectl [--json] [--no-color] start <slot1..slot10>
   orangectl [--json] [--no-color] status [slot1..slot10]
   orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
+  orangectl [--json] [--no-color] restart <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -197,6 +198,7 @@ var commandSummaries = []jsonHelpCommand{
 	{Name: "start", Summary: "start an enabled, valid slot process"},
 	{Name: "status", Summary: "show running, stopped, or stale process state"},
 	{Name: "stop", Summary: "stop a verified slot process"},
+	{Name: "restart", Summary: "stop then start a slot process"},
 	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
@@ -271,6 +273,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return reportUsageError(stderr, err.Error())
 		}
 		return stop(stdout, stderr, cleaned[1], opts)
+	case "restart":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "restart requires exactly one slot")
+		}
+		if err := config.RequireAllowed(cleaned[1]); err != nil {
+			return reportUsageError(stderr, err.Error())
+		}
+		return restart(stdout, stderr, cleaned[1], opts)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
@@ -426,6 +436,22 @@ func stop(stdout, stderr io.Writer, name string, opts globalOptions) int {
 		return writeJSON(stdout, map[string]string{"slot": name, "result": "stopped"})
 	}
 	fmt.Fprintf(stdout, "Stopped %s\n", name)
+	return 0
+}
+
+func restart(stdout, stderr io.Writer, name string, opts globalOptions) int {
+	slot, err := config.Load(name)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	state, err := process.DefaultManager().Restart(slot)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if opts.jsonOutput {
+		return writeJSON(stdout, jsonStartResult{State: state})
+	}
+	fmt.Fprintf(stdout, "Restarted %s (PID %d)\n", state.Slot, state.PID)
 	return 0
 }
 
