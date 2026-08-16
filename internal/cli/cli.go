@@ -31,6 +31,7 @@ Usage:
   orangectl [--json] [--no-color] restart <slot1..slot10>
   orangectl [--json] [--no-color] [--lines N] [--follow] logs <slot1..slot10>
   orangectl edit <slot1..slot10>
+  orangectl --yes reset <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -41,6 +42,7 @@ Global flags:
   --force      Send SIGKILL after stop timeout; valid only with stop.
   --lines N    Number of log lines; valid only with logs.
   --follow     Continue streaming a log until Ctrl+C; valid only with logs.
+  --yes        Confirm reset; valid only with reset.
 
 Each command's exit code is 0 on success, 1 on operational failure, and 2
 on usage errors (unknown command, bad arguments, unknown slot).
@@ -69,6 +71,7 @@ type globalOptions struct {
 	logLines    int
 	linesSet    bool
 	follow      bool
+	yes         bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -108,6 +111,8 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 			opts.logLines, opts.linesSet = count, true
 		case "--follow":
 			opts.follow = true
+		case "--yes":
+			opts.yes = true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
@@ -255,6 +260,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if (opts.linesSet || opts.follow) && cleaned[0] != "logs" {
 		return reportUsageError(stderr, "--lines is valid only with logs")
 	}
+	if opts.yes && cleaned[0] != "reset" {
+		return reportUsageError(stderr, "--yes is valid only with reset")
+	}
 
 	switch cleaned[0] {
 	case "help", "-h", "--help":
@@ -336,6 +344,30 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err := config.Edit(cleaned[1]); err != nil {
 			return reportOperationError(stderr, err)
 		}
+		return 0
+	case "reset":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "reset requires exactly one slot")
+		}
+		if !opts.yes {
+			return reportUsageError(stderr, "reset requires confirmation; pass --yes")
+		}
+		slot, err := config.Load(cleaned[1])
+		if err != nil {
+			return reportOperationError(stderr, err)
+		}
+		status, err := process.DefaultManager().Status(slot)
+		if err != nil {
+			return reportOperationError(stderr, err)
+		}
+		if status.State == process.StatusRunning {
+			return reportOperationError(stderr, fmt.Errorf("cannot reset a running slot"))
+		}
+		backup, err := config.Reset(cleaned[1])
+		if err != nil {
+			return reportOperationError(stderr, err)
+		}
+		fmt.Fprintf(stdout, "Reset %s (backup: %s)\n", cleaned[1], backup)
 		return 0
 	case "version":
 		if len(cleaned) != 1 {
