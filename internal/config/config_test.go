@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,21 @@ func TestLoadRejectsBrokenJSON(t *testing.T) {
 	_, err := Load("slot1")
 	if err == nil {
 		t.Fatal("Load() returned no error for broken JSON")
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("Load() error = %v, want wrapped io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestLoadWrapsJSONSyntaxError(t *testing.T) {
+	writeConfig(t, "slot1", `{"slot":}`)
+
+	_, err := Load("slot1")
+	if err == nil {
+		t.Fatal("Load() returned no error for malformed JSON")
 	}
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("Load() error = %v, want ErrInvalidConfig", err)

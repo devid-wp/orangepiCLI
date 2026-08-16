@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
 )
 
@@ -16,7 +17,7 @@ func TestHelp(t *testing.T) {
 	if code := Run([]string{"help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("Run() code = %d", code)
 	}
-	if !strings.Contains(stdout.String(), "orangectl validate") {
+	if !strings.Contains(stdout.String(), "validate [slot1..slot10]") || !strings.Contains(stdout.String(), "orangectl [--json] [--no-color] version") {
 		t.Fatalf("help output = %q", stdout.String())
 	}
 }
@@ -83,6 +84,7 @@ func TestErrorMessagesGoToStderr(t *testing.T) {
 		{name: "unknown command", args: []string{"bogus"}, exitCode: 2},
 		{name: "list with extra arg", args: []string{"list", "slot1"}, exitCode: 2},
 		{name: "init with extra arg", args: []string{"init", "now"}, exitCode: 2},
+		{name: "version with extra arg", args: []string{"version", "now"}, exitCode: 2},
 		{name: "validate with too many args", args: []string{"validate", "slot1", "slot2"}, exitCode: 2},
 		{name: "validate unknown slot", args: []string{"validate", "other"}, exitCode: 2},
 	}
@@ -221,16 +223,14 @@ func TestJSONListShape(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv(config.ConfigDirEnv, configDir)
 	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
 
 	broken := filepath.Join(configDir, "slot1.json")
 	if err := os.WriteFile(broken, []byte(`{"slot":"slot1"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	healthy := filepath.Join(configDir, "slot2.json")
-	if err := os.WriteFile(healthy, []byte(`{"slot":"slot2","enabled":false,"display_name":"Empty Slot 2","environment":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"list", "--json"}, &stdout, &stderr)
 	if code != 1 {
@@ -282,6 +282,9 @@ func TestJSONValidateShape(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv(config.ConfigDirEnv, configDir)
 	t.Setenv("ORANGECTL_STATE_DIR", t.TempDir())
+	if _, err := config.Initialize(); err != nil {
+		t.Fatal(err)
+	}
 
 	// Healthy disabled slot.
 	healthy := filepath.Join(configDir, "slot1.json")
@@ -304,8 +307,8 @@ func TestJSONValidateShape(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("validate --json output is not valid JSON: %v (raw=%q)", err, stdout.String())
 	}
-	if len(got.Results) != 2 {
-		t.Fatalf("results length = %d, want 2", len(got.Results))
+	if len(got.Results) != len(config.AllowedSlots) {
+		t.Fatalf("results length = %d, want %d", len(got.Results), len(config.AllowedSlots))
 	}
 	results := map[string]jsonValidateSlot{}
 	for _, entry := range got.Results {
@@ -344,14 +347,52 @@ func TestJSONHelpShape(t *testing.T) {
 	for _, c := range got.Commands {
 		names[c.Name] = true
 	}
-	for _, want := range []string{"init", "list", "validate", "help"} {
+	for _, want := range []string{"init", "list", "validate", "version", "help"} {
 		if !names[want] {
 			t.Fatalf("commands missing %q in %+v", want, got.Commands)
 		}
 	}
-	if !strings.Contains(got.Usage, "orangectl validate") {
-		t.Fatalf("usage missing 'orangectl validate': %q", got.Usage)
+	if !strings.Contains(got.Usage, "validate [slot1..slot10]") {
+		t.Fatalf("usage missing validate command: %q", got.Usage)
 	}
+}
+
+func TestVersionTextAndJSON(t *testing.T) {
+	originalVersion, originalCommit, originalBuildDate := buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate
+	buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate = "v1.2.3", "abc1234", "2026-08-16T12:00:00Z"
+	t.Cleanup(func() {
+		buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate = originalVersion, originalCommit, originalBuildDate
+	})
+
+	t.Run("text", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"version"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+		}
+		if got, want := stdout.String(), "Version: v1.2.3\nCommit: abc1234\nBuild date: 2026-08-16T12:00:00Z\n"; got != want {
+			t.Fatalf("version output = %q, want %q", got, want)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"--json", "version"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("Run() code = %d, stderr=%q", code, stderr.String())
+		}
+		var got jsonVersionResult
+		if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+			t.Fatalf("version --json output is not valid JSON: %v (raw=%q)", err, stdout.String())
+		}
+		if got != (jsonVersionResult{Version: "v1.2.3", Commit: "abc1234", BuildDate: "2026-08-16T12:00:00Z"}) {
+			t.Fatalf("version --json = %+v", got)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+	})
 }
 
 const ansiEscape = "\033["
