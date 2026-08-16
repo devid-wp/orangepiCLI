@@ -22,7 +22,7 @@ Usage:
   orangectl [--json] [--no-color] validate [slot1..slot10]
   orangectl [--json] [--no-color] start <slot1..slot10>
   orangectl [--json] [--no-color] status [slot1..slot10]
-  orangectl [--json] [--no-color] [--timeout 10s] stop <slot1..slot10>
+  orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -30,6 +30,7 @@ Global flags:
   --json       Emit machine-readable JSON on stdout.
   --no-color   Disable ANSI colour escapes. Respects NO_COLOR and TERM=dumb.
   --timeout D  Stop timeout (default: 10s); valid only with stop.
+  --force      Send SIGKILL after stop timeout; valid only with stop.
 
 Each command's exit code is 0 on success, 1 on operational failure, and 2
 on usage errors (unknown command, bad arguments, unknown slot).
@@ -54,6 +55,7 @@ type globalOptions struct {
 	noColor     bool
 	stopTimeout time.Duration
 	timeoutSet  bool
+	force       bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -79,6 +81,8 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 				return nil, opts, fmt.Errorf("--timeout must be a positive duration")
 			}
 			opts.stopTimeout, opts.timeoutSet = duration, true
+		case "--force":
+			opts.force = true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
@@ -210,8 +214,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	if opts.timeoutSet && cleaned[0] != "stop" {
-		return reportUsageError(stderr, "--timeout is valid only with stop")
+	if (opts.timeoutSet || opts.force) && cleaned[0] != "stop" {
+		return reportUsageError(stderr, "--timeout and --force are valid only with stop")
 	}
 
 	switch cleaned[0] {
@@ -410,7 +414,12 @@ func stop(stdout, stderr io.Writer, name string, opts globalOptions) int {
 	if opts.timeoutSet {
 		manager.StopTimeout = opts.stopTimeout
 	}
-	if err := manager.Stop(slot); err != nil {
+	if opts.force {
+		err = manager.ForceStop(slot)
+	} else {
+		err = manager.Stop(slot)
+	}
+	if err != nil {
 		return reportOperationError(stderr, err)
 	}
 	if opts.jsonOutput {

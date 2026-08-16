@@ -162,6 +162,16 @@ func (manager Manager) Status(slot config.SlotConfig) (SlotStatus, error) {
 }
 
 func (manager Manager) Stop(slot config.SlotConfig) error {
+	return manager.stop(slot, false)
+}
+
+// ForceStop sends SIGKILL only after a timed-out graceful stop and a fresh
+// identity check. It never kills a PID solely because it appears in state.
+func (manager Manager) ForceStop(slot config.SlotConfig) error {
+	return manager.stop(slot, true)
+}
+
+func (manager Manager) stop(slot config.SlotConfig, force bool) error {
 	if err := manager.valid(); err != nil {
 		return err
 	}
@@ -193,6 +203,20 @@ func (manager Manager) Stop(slot config.SlotConfig) error {
 		if err := group.SignalGroup(state.PID, terminationSignal()); err != nil {
 			return fmt.Errorf("send termination signal: %w", err)
 		}
+	}
+	err = manager.waitForExit(slot, state)
+	if !force || !errors.Is(err, ErrStopTimeout) {
+		return err
+	}
+	if err := VerifyProcessIdentity(manager.Operations.Proc, state, manager.expected(slot, slot.StartCommand)); err != nil {
+		return err
+	}
+	group, ok := manager.Operations.Signaler.(GroupSignaler)
+	if !ok {
+		return fmt.Errorf("process manager cannot signal process groups")
+	}
+	if err := group.SignalGroup(state.PID, killSignal()); err != nil {
+		return fmt.Errorf("send kill signal: %w", err)
 	}
 	return manager.waitForExit(slot, state)
 }
