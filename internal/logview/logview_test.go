@@ -21,3 +21,16 @@ func TestOpenRejectsSymbolicLink(t *testing.T) {
 		t.Fatalf("Open() error=%v", err)
 	}
 }
+func TestLastLinesReturnsSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "slot.log")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\nfour\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LastLines(path, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "three" || got[1] != "four" {
+		t.Fatalf("LastLines=%v", got)
+	}
+}

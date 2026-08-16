@@ -10,6 +10,7 @@ import (
 
 	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
+	"github.com/devid-wp/orangepiCLI/internal/logview"
 	"github.com/devid-wp/orangepiCLI/internal/process"
 	"github.com/devid-wp/orangepiCLI/internal/term"
 )
@@ -24,6 +25,7 @@ Usage:
   orangectl [--json] [--no-color] status [slot1..slot10]
   orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
   orangectl [--json] [--no-color] restart <slot1..slot10>
+  orangectl [--json] [--no-color] logs <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -199,6 +201,7 @@ var commandSummaries = []jsonHelpCommand{
 	{Name: "status", Summary: "show running, stopped, or stale process state"},
 	{Name: "stop", Summary: "stop a verified slot process"},
 	{Name: "restart", Summary: "stop then start a slot process"},
+	{Name: "logs", Summary: "show the last 50 lines of a slot log"},
 	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
@@ -281,6 +284,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return reportUsageError(stderr, err.Error())
 		}
 		return restart(stdout, stderr, cleaned[1], opts)
+	case "logs":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "logs requires exactly one slot")
+		}
+		if err := config.RequireAllowed(cleaned[1]); err != nil {
+			return reportUsageError(stderr, err.Error())
+		}
+		return logs(stdout, stderr, cleaned[1], opts, 50)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
@@ -452,6 +463,27 @@ func restart(stdout, stderr io.Writer, name string, opts globalOptions) int {
 		return writeJSON(stdout, jsonStartResult{State: state})
 	}
 	fmt.Fprintf(stdout, "Restarted %s (PID %d)\n", state.Slot, state.PID)
+	return 0
+}
+
+func logs(stdout, stderr io.Writer, name string, opts globalOptions, count int) int {
+	slot, err := config.Load(name)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if slot.LogFile == "" {
+		return reportOperationError(stderr, fmt.Errorf("slot %q has no log_file", name))
+	}
+	lines, err := logview.LastLines(slot.LogFile, count)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if opts.jsonOutput {
+		return writeJSON(stdout, map[string]any{"slot": name, "lines": lines})
+	}
+	for _, line := range lines {
+		fmt.Fprintln(stdout, line)
+	}
 	return 0
 }
 

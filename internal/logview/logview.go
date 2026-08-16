@@ -2,6 +2,7 @@
 package logview
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -23,4 +24,32 @@ func Open(path string) (*os.File, error) {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
 	return file, nil
+}
+
+// LastLines returns the requested suffix of a log. The initial implementation
+// favours correctness; large-file reverse block reading is added separately.
+func LastLines(path string, count int) ([]string, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("line count must be positive")
+	}
+	file, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	lines := make([]string, 0, count)
+	scanner := bufio.NewScanner(file)
+	buffer := make([]byte, 64*1024)
+	scanner.Buffer(buffer, 1024*1024)
+	for scanner.Scan() {
+		if len(lines) == count {
+			copy(lines, lines[1:])
+			lines = lines[:count-1]
+		}
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read log file: %w", err)
+	}
+	return lines, nil
 }
