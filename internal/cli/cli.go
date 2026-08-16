@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -25,7 +26,7 @@ Usage:
   orangectl [--json] [--no-color] status [slot1..slot10]
   orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
   orangectl [--json] [--no-color] restart <slot1..slot10>
-  orangectl [--json] [--no-color] logs <slot1..slot10>
+  orangectl [--json] [--no-color] [--lines N] logs <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -34,6 +35,7 @@ Global flags:
   --no-color   Disable ANSI colour escapes. Respects NO_COLOR and TERM=dumb.
   --timeout D  Stop timeout (default: 10s); valid only with stop.
   --force      Send SIGKILL after stop timeout; valid only with stop.
+  --lines N    Number of log lines; valid only with logs.
 
 Each command's exit code is 0 on success, 1 on operational failure, and 2
 on usage errors (unknown command, bad arguments, unknown slot).
@@ -59,6 +61,8 @@ type globalOptions struct {
 	stopTimeout time.Duration
 	timeoutSet  bool
 	force       bool
+	logLines    int
+	linesSet    bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -86,6 +90,16 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 			opts.stopTimeout, opts.timeoutSet = duration, true
 		case "--force":
 			opts.force = true
+		case "--lines":
+			if index+1 >= len(args) {
+				return nil, opts, fmt.Errorf("--lines requires a positive integer")
+			}
+			index++
+			count, parseErr := strconv.Atoi(args[index])
+			if parseErr != nil || count <= 0 {
+				return nil, opts, fmt.Errorf("--lines requires a positive integer")
+			}
+			opts.logLines, opts.linesSet = count, true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
@@ -95,6 +109,14 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 					return nil, opts, fmt.Errorf("--timeout must be a positive duration")
 				}
 				opts.stopTimeout, opts.timeoutSet = duration, true
+				continue
+			}
+			if strings.HasPrefix(arg, "--lines=") {
+				count, parseErr := strconv.Atoi(strings.TrimPrefix(arg, "--lines="))
+				if parseErr != nil || count <= 0 {
+					return nil, opts, fmt.Errorf("--lines requires a positive integer")
+				}
+				opts.logLines, opts.linesSet = count, true
 				continue
 			}
 			if len(arg) > 1 && arg[0] == '-' {
@@ -222,6 +244,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if (opts.timeoutSet || opts.force) && cleaned[0] != "stop" {
 		return reportUsageError(stderr, "--timeout and --force are valid only with stop")
 	}
+	if opts.linesSet && cleaned[0] != "logs" {
+		return reportUsageError(stderr, "--lines is valid only with logs")
+	}
 
 	switch cleaned[0] {
 	case "help", "-h", "--help":
@@ -291,7 +316,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err := config.RequireAllowed(cleaned[1]); err != nil {
 			return reportUsageError(stderr, err.Error())
 		}
-		return logs(stdout, stderr, cleaned[1], opts, 50)
+		count := 50
+		if opts.linesSet {
+			count = opts.logLines
+		}
+		return logs(stdout, stderr, cleaned[1], opts, count)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
