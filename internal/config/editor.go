@@ -37,5 +37,12 @@ func Edit(name string) error {
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("run editor: %w", err)
 	}
+	slot, err := Load(name)
+	if err != nil {
+		return fmt.Errorf("validate edited configuration: %w", err)
+	}
+	if validationErrors := Validate(slot); len(validationErrors) > 0 {
+		return fmt.Errorf("validate edited configuration: %s", FormatErrors(validationErrors))
+	}
 	return nil
 }
