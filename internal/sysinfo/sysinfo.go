@@ -68,6 +68,29 @@ type Info struct {
 	MemoryTotalKB int64  `json:"memory_total_kb"`
 	MemoryFreeKB  int64  `json:"memory_free_kb"`
 }
+type Platform struct {
+	Board  string `json:"board"`
+	OS     string `json:"os"`
+	Kernel string `json:"kernel"`
+}
+
+func PlatformInfo(source Source) Platform {
+	read := func(path string) string {
+		data, err := source.ReadFile(path)
+		if err != nil {
+			return "unavailable"
+		}
+		return strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
+	}
+	osRelease := read("/etc/os-release")
+	osName := "unavailable"
+	for _, line := range strings.Split(osRelease, "\n") {
+		if strings.HasPrefix(line, "PRETTY_NAME=") {
+			osName = strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), "\"")
+		}
+	}
+	return Platform{Board: read("/sys/firmware/devicetree/base/model"), OS: osName, Kernel: read("/proc/sys/kernel/osrelease")}
+}
 
 func Collect(source Source) (Info, error) {
 	host, err := source.Hostname()
