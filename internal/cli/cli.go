@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -26,7 +29,7 @@ Usage:
   orangectl [--json] [--no-color] status [slot1..slot10]
   orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
   orangectl [--json] [--no-color] restart <slot1..slot10>
-  orangectl [--json] [--no-color] [--lines N] logs <slot1..slot10>
+  orangectl [--json] [--no-color] [--lines N] [--follow] logs <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -36,6 +39,7 @@ Global flags:
   --timeout D  Stop timeout (default: 10s); valid only with stop.
   --force      Send SIGKILL after stop timeout; valid only with stop.
   --lines N    Number of log lines; valid only with logs.
+  --follow     Continue streaming a log until Ctrl+C; valid only with logs.
 
 Each command's exit code is 0 on success, 1 on operational failure, and 2
 on usage errors (unknown command, bad arguments, unknown slot).
@@ -63,6 +67,7 @@ type globalOptions struct {
 	force       bool
 	logLines    int
 	linesSet    bool
+	follow      bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -100,6 +105,8 @@ func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, er
 				return nil, opts, fmt.Errorf("--lines requires a positive integer")
 			}
 			opts.logLines, opts.linesSet = count, true
+		case "--follow":
+			opts.follow = true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
@@ -244,7 +251,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if (opts.timeoutSet || opts.force) && cleaned[0] != "stop" {
 		return reportUsageError(stderr, "--timeout and --force are valid only with stop")
 	}
-	if opts.linesSet && cleaned[0] != "logs" {
+	if (opts.linesSet || opts.follow) && cleaned[0] != "logs" {
 		return reportUsageError(stderr, "--lines is valid only with logs")
 	}
 
@@ -512,6 +519,13 @@ func logs(stdout, stderr io.Writer, name string, opts globalOptions, count int) 
 	}
 	for _, line := range lines {
 		fmt.Fprintln(stdout, line)
+	}
+	if opts.follow {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+		if err := logview.Follow(ctx, slot.LogFile, stdout); err != nil {
+			return reportOperationError(stderr, err)
+		}
 	}
 	return 0
 }
