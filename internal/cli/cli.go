@@ -6,6 +6,7 @@ import (
 	"io"
 	"text/tabwriter"
 
+	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
 	"github.com/devid-wp/orangepiCLI/internal/term"
 )
@@ -16,6 +17,7 @@ Usage:
   orangectl [--json] [--no-color] init
   orangectl [--json] [--no-color] list
   orangectl [--json] [--no-color] validate [slot1..slot10]
+  orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
 Global flags:
@@ -139,12 +141,20 @@ type jsonHelpResult struct {
 	Usage    string            `json:"usage"`
 }
 
+// jsonVersionResult is the stable --json shape of `orangectl version`.
+type jsonVersionResult struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"build_date"`
+}
+
 // commandSummaries lists every CLI command with a short description.
 // The order matches the order in runCommand.
 var commandSummaries = []jsonHelpCommand{
 	{Name: "init", Summary: "create missing configuration directories and slot files"},
 	{Name: "list", Summary: "show all ten slots with enabled flag and basic status"},
 	{Name: "validate", Summary: "validate one slot or all slots and report errors"},
+	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
 
@@ -187,6 +197,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return validate(stdout, name, opts)
+	case "version":
+		if len(cleaned) != 1 {
+			return reportUsageError(stderr, "version does not accept arguments")
+		}
+		return version(stdout, opts)
 	default:
 		return reportUsageError(stderr, fmt.Sprintf("unknown command %q", cleaned[0]))
 	}
@@ -236,6 +251,21 @@ func help(stdout io.Writer, opts globalOptions) int {
 		return writeJSON(stdout, jsonHelpResult{Commands: commandSummaries, Usage: usage})
 	}
 	fmt.Fprint(stdout, usage)
+	return 0
+}
+
+// version prints build metadata. Release builds overwrite these defaults with
+// -ldflags -X, while local builds retain meaningful development values.
+func version(stdout io.Writer, opts globalOptions) int {
+	result := jsonVersionResult{
+		Version:   buildinfo.Version,
+		Commit:    buildinfo.Commit,
+		BuildDate: buildinfo.BuildDate,
+	}
+	if opts.jsonOutput {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Version: %s\nCommit: %s\nBuild date: %s\n", result.Version, result.Commit, result.BuildDate)
 	return 0
 }
 

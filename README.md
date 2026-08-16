@@ -1,8 +1,8 @@
 # OrangeCTL
 
 OrangeCTL is a Go CLI for managing up to ten user-configured processes on an
-Orange Pi. The current implementation provides the `init`, `list`, and
-`validate` commands. It has no runtime dependencies and builds into a single
+Orange Pi. The current implementation provides the `init`, `list`, `validate`,
+and `version` commands. It has no runtime dependencies and builds into a single
 executable.
 
 ## Requirements
@@ -57,6 +57,7 @@ export ORANGECTL_STATE_DIR=./state
 orangectl list
 orangectl validate
 orangectl validate slot1
+orangectl version
 ```
 
 Explicit `ORANGECTL_CONFIG_DIR` and `ORANGECTL_STATE_DIR` values take precedence
@@ -65,3 +66,10 @@ are kept unchanged.
 
 Edit one of the generated slot files, set `enabled` to `true`, and provide its
 working directory and start command.
+
+`orangectl version` reports the version, source commit, and build date. Embed
+release metadata during a build with:
+
+```bash
+go build -ldflags "-X github.com/devid-wp/orangepiCLI/internal/buildinfo.Version=v1.0.0 -X github.com/devid-wp/orangepiCLI/internal/buildinfo.Commit=$(git rev-parse --short HEAD) -X github.com/devid-wp/orangepiCLI/internal/buildinfo.BuildDate=$(git show -s --format=%cI HEAD)" -o orangectl ./cmd/orangectl
+```
