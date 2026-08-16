@@ -1,0 +1,14 @@
+[Unit]
+Description=OrangeCTL managed slot %i
+After=network.target
+
+[Service]
+Type=simple
+User=orangectl
+ExecStart=/usr/local/bin/orangectl start %i
+ExecStop=/usr/local/bin/orangectl stop %i
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
