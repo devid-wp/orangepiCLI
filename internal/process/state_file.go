@@ -99,3 +99,15 @@ func ReadState(path string) (ProcessState, error) {
 	}
 	return state, nil
 }
+
+// RemoveState removes only a regular, non-symlink state file. Lifecycle code
+// calls it after confirming a process has exited or that a state file is stale.
+func RemoveState(path string) error {
+	if err := ensureSafeStateTarget(path); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove process state: %w", err)
+	}
+	return nil
+}

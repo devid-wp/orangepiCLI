@@ -15,12 +15,13 @@ import (
 // command and its arguments separate: callers must not build shell text from
 // untrusted CLI arguments.
 type Command struct {
-	Path   string
-	Args   []string
-	Dir    string
-	Env    []string
-	Stdout io.Writer
-	Stderr io.Writer
+	Path            string
+	Args            []string
+	Dir             string
+	Env             []string
+	Stdout          io.Writer
+	Stderr          io.Writer
+	NewProcessGroup bool
 }
 
 // StartedProcess is the small part of exec.Cmd that lifecycle code needs.
@@ -82,6 +83,7 @@ func (execLauncher) Start(command Command) (StartedProcess, error) {
 	cmd.Env = command.Env
 	cmd.Stdout = command.Stdout
 	cmd.Stderr = command.Stderr
+	configureProcessGroup(cmd, command.NewProcessGroup)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

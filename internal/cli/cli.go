@@ -8,6 +8,7 @@ import (
 
 	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
+	"github.com/devid-wp/orangepiCLI/internal/process"
 	"github.com/devid-wp/orangepiCLI/internal/term"
 )
 
@@ -17,6 +18,7 @@ Usage:
   orangectl [--json] [--no-color] init
   orangectl [--json] [--no-color] list
   orangectl [--json] [--no-color] validate [slot1..slot10]
+  orangectl [--json] [--no-color] start <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -148,12 +150,17 @@ type jsonVersionResult struct {
 	BuildDate string `json:"build_date"`
 }
 
+type jsonStartResult struct {
+	State process.ProcessState `json:"state"`
+}
+
 // commandSummaries lists every CLI command with a short description.
 // The order matches the order in runCommand.
 var commandSummaries = []jsonHelpCommand{
 	{Name: "init", Summary: "create missing configuration directories and slot files"},
 	{Name: "list", Summary: "show all ten slots with enabled flag and basic status"},
 	{Name: "validate", Summary: "validate one slot or all slots and report errors"},
+	{Name: "start", Summary: "start an enabled, valid slot process"},
 	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
@@ -197,6 +204,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return validate(stdout, name, opts)
+	case "start":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "start requires exactly one slot")
+		}
+		if err := config.RequireAllowed(cleaned[1]); err != nil {
+			return reportUsageError(stderr, err.Error())
+		}
+		return start(stdout, stderr, cleaned[1], opts)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
@@ -266,6 +281,22 @@ func version(stdout io.Writer, opts globalOptions) int {
 		return writeJSON(stdout, result)
 	}
 	fmt.Fprintf(stdout, "Version: %s\nCommit: %s\nBuild date: %s\n", result.Version, result.Commit, result.BuildDate)
+	return 0
+}
+
+func start(stdout, stderr io.Writer, name string, opts globalOptions) int {
+	slot, err := config.Load(name)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	state, err := process.DefaultManager().Start(slot)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if opts.jsonOutput {
+		return writeJSON(stdout, jsonStartResult{State: state})
+	}
+	fmt.Fprintf(stdout, "Started %s (PID %d)\n", state.Slot, state.PID)
 	return 0
 }
 
