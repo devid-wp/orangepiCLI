@@ -30,6 +30,7 @@ Usage:
   orangectl [--json] [--no-color] [--timeout 10s] [--force] stop <slot1..slot10>
   orangectl [--json] [--no-color] restart <slot1..slot10>
   orangectl [--json] [--no-color] [--lines N] [--follow] logs <slot1..slot10>
+  orangectl edit <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -328,6 +329,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			count = opts.logLines
 		}
 		return logs(stdout, stderr, cleaned[1], opts, count)
+	case "edit":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "edit requires exactly one slot")
+		}
+		if err := config.Edit(cleaned[1]); err != nil {
+			return reportOperationError(stderr, err)
+		}
+		return 0
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
