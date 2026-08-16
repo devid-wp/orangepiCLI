@@ -20,6 +20,7 @@ Usage:
   orangectl [--json] [--no-color] validate [slot1..slot10]
   orangectl [--json] [--no-color] start <slot1..slot10>
   orangectl [--json] [--no-color] status [slot1..slot10]
+  orangectl [--json] [--no-color] stop <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -167,6 +168,7 @@ var commandSummaries = []jsonHelpCommand{
 	{Name: "validate", Summary: "validate one slot or all slots and report errors"},
 	{Name: "start", Summary: "start an enabled, valid slot process"},
 	{Name: "status", Summary: "show running, stopped, or stale process state"},
+	{Name: "stop", Summary: "stop a verified slot process"},
 	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
@@ -230,6 +232,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return status(stdout, stderr, name, opts)
+	case "stop":
+		if len(cleaned) != 2 {
+			return reportUsageError(stderr, "stop requires exactly one slot")
+		}
+		if err := config.RequireAllowed(cleaned[1]); err != nil {
+			return reportUsageError(stderr, err.Error())
+		}
+		return stop(stdout, stderr, cleaned[1], opts)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
@@ -361,6 +371,21 @@ func status(stdout, stderr io.Writer, requested string, opts globalOptions) int 
 	if failed {
 		return exitOperationError
 	}
+	return 0
+}
+
+func stop(stdout, stderr io.Writer, name string, opts globalOptions) int {
+	slot, err := config.Load(name)
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if err := process.DefaultManager().Stop(slot); err != nil {
+		return reportOperationError(stderr, err)
+	}
+	if opts.jsonOutput {
+		return writeJSON(stdout, map[string]string{"slot": name, "result": "stopped"})
+	}
+	fmt.Fprintf(stdout, "Stopped %s\n", name)
 	return 0
 }
 

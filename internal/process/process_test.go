@@ -46,7 +46,8 @@ func (fake fakeProcReader) ReadProcess(int) (ProcProcess, error) {
 
 type fakeClock struct{ now time.Time }
 
-func (clock fakeClock) Now() time.Time { return clock.now }
+func (clock fakeClock) Now() time.Time      { return clock.now }
+func (clock fakeClock) Sleep(time.Duration) {}
 
 func TestOperationsDependenciesAreReplaceable(t *testing.T) {
 	launcher := &fakeLauncher{}

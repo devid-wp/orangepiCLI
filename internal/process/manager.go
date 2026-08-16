@@ -7,12 +7,16 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/devid-wp/orangepiCLI/internal/config"
 	"github.com/devid-wp/orangepiCLI/internal/paths"
 )
 
 var ErrAlreadyRunning = errors.New("slot process is already running")
+var ErrStopTimeout = errors.New("process stop timed out")
+
+const DefaultStopTimeout = 10 * time.Second
 
 type Status string
 
@@ -37,13 +41,15 @@ type Manager struct {
 	Operations     Operations
 	StateDirectory string
 	UserID         string
+	StopTimeout    time.Duration
+	PollInterval   time.Duration
 }
 
 func NewManager(operations Operations, stateDirectory string) Manager {
 	if stateDirectory == "" {
 		stateDirectory = paths.PIDDir()
 	}
-	return Manager{Operations: operations, StateDirectory: stateDirectory, UserID: currentUserID()}
+	return Manager{Operations: operations, StateDirectory: stateDirectory, UserID: currentUserID(), StopTimeout: DefaultStopTimeout, PollInterval: 100 * time.Millisecond}
 }
 
 func DefaultManager() Manager { return NewManager(DefaultOperations(), paths.PIDDir()) }
@@ -153,6 +159,67 @@ func (manager Manager) Status(slot config.SlotConfig) (SlotStatus, error) {
 		return SlotStatus{Slot: slot.Slot, State: StatusStale, PID: state.PID, Info: state}, nil
 	}
 	return SlotStatus{}, err
+}
+
+func (manager Manager) Stop(slot config.SlotConfig) error {
+	if err := manager.valid(); err != nil {
+		return err
+	}
+	state, err := ReadState(manager.statePath(slot.Slot))
+	if err != nil {
+		return err
+	}
+	if err := VerifyProcessIdentity(manager.Operations.Proc, state, manager.expected(slot, slot.StartCommand)); err != nil {
+		return err
+	}
+	if slot.StopCommand != "" {
+		env, err := BuildEnvironment(slot.EnvFile, slot.Environment)
+		if err != nil {
+			return err
+		}
+		command := Command{Path: "/bin/sh", Args: []string{"-c", slot.StopCommand}, Dir: slot.WorkingDirectory, Env: env}
+		started, err := manager.Operations.Launcher.Start(command)
+		if err != nil {
+			return fmt.Errorf("run stop command: %w", err)
+		}
+		if err := started.Wait(); err != nil {
+			return fmt.Errorf("wait for stop command: %w", err)
+		}
+	} else {
+		group, ok := manager.Operations.Signaler.(GroupSignaler)
+		if !ok {
+			return fmt.Errorf("process manager cannot signal process groups")
+		}
+		if err := group.SignalGroup(state.PID, terminationSignal()); err != nil {
+			return fmt.Errorf("send termination signal: %w", err)
+		}
+	}
+	return manager.waitForExit(slot, state)
+}
+
+func (manager Manager) waitForExit(slot config.SlotConfig, state ProcessState) error {
+	timeout := manager.StopTimeout
+	if timeout <= 0 {
+		timeout = DefaultStopTimeout
+	}
+	poll := manager.PollInterval
+	if poll <= 0 {
+		poll = 100 * time.Millisecond
+	}
+	deadline := manager.Operations.Clock.Now().Add(timeout)
+	for {
+		err := VerifyProcessIdentity(manager.Operations.Proc, state, manager.expected(slot, slot.StartCommand))
+		if errors.Is(err, ErrProcessNotFound) {
+			return RemoveState(manager.statePath(slot.Slot))
+		}
+		if err != nil {
+			return err
+		}
+		if !manager.Operations.Clock.Now().Before(deadline) {
+			return ErrStopTimeout
+		}
+		manager.Operations.Clock.Sleep(poll)
+	}
 }
 
 func (manager Manager) logPath(slot config.SlotConfig) string {

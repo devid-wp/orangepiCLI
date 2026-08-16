@@ -43,6 +43,10 @@ type Signaler interface {
 	Signal(pid int, signal os.Signal) error
 }
 
+type GroupSignaler interface {
+	SignalGroup(pgid int, signal os.Signal) error
+}
+
 // ProcReader reads stable process facts from a proc-compatible filesystem.
 // Identity is an OS-provided start token; together with PID it detects reuse
 // of a PID by a different process.
@@ -53,6 +57,7 @@ type ProcReader interface {
 // Clock abstracts wall time used when a process state is created.
 type Clock interface {
 	Now() time.Time
+	Sleep(time.Duration)
 }
 
 // Operations groups all system dependencies used by lifecycle operations.
@@ -105,6 +110,11 @@ func (osSignaler) Signal(pid int, signal os.Signal) error {
 	return process.Signal(signal)
 }
 
+func (osSignaler) SignalGroup(pgid int, signal os.Signal) error {
+	return signalProcessGroup(pgid, signal)
+}
+
 type systemClock struct{}
 
-func (systemClock) Now() time.Time { return time.Now() }
+func (systemClock) Now() time.Time               { return time.Now() }
+func (systemClock) Sleep(duration time.Duration) { time.Sleep(duration) }
