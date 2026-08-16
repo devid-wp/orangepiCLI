@@ -14,6 +14,23 @@ import (
 
 var ErrAlreadyRunning = errors.New("slot process is already running")
 
+type Status string
+
+const (
+	StatusStopped Status = "stopped"
+	StatusRunning Status = "running"
+	StatusStale   Status = "stale"
+)
+
+// SlotStatus is a safe status projection; it contains no command or
+// environment values.
+type SlotStatus struct {
+	Slot  string       `json:"slot"`
+	State Status       `json:"state"`
+	PID   int          `json:"pid,omitempty"`
+	Info  ProcessState `json:"info,omitempty"`
+}
+
 // Manager owns lifecycle dependencies and persistent process state. It is
 // deliberately configured with interfaces so tests can use no real processes.
 type Manager struct {
@@ -109,6 +126,33 @@ func (manager Manager) Start(slot config.SlotConfig) (ProcessState, error) {
 		return ProcessState{}, err
 	}
 	return state, nil
+}
+
+// Status reports stopped when no state exists, running only after full
+// identity verification, and stale when the PID file refers to an exited or
+// replaced process. A status lookup never signals or deletes anything.
+func (manager Manager) Status(slot config.SlotConfig) (SlotStatus, error) {
+	if err := manager.valid(); err != nil {
+		return SlotStatus{}, err
+	}
+	if err := config.RequireAllowed(slot.Slot); err != nil {
+		return SlotStatus{}, err
+	}
+	state, err := ReadState(manager.statePath(slot.Slot))
+	if errors.Is(err, os.ErrNotExist) {
+		return SlotStatus{Slot: slot.Slot, State: StatusStopped}, nil
+	}
+	if err != nil {
+		return SlotStatus{}, err
+	}
+	err = VerifyProcessIdentity(manager.Operations.Proc, state, manager.expected(slot, slot.StartCommand))
+	if err == nil {
+		return SlotStatus{Slot: slot.Slot, State: StatusRunning, PID: state.PID, Info: state}, nil
+	}
+	if errors.Is(err, ErrProcessNotFound) || errors.Is(err, ErrProcessIdentityMismatch) {
+		return SlotStatus{Slot: slot.Slot, State: StatusStale, PID: state.PID, Info: state}, nil
+	}
+	return SlotStatus{}, err
 }
 
 func (manager Manager) logPath(slot config.SlotConfig) string {

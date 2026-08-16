@@ -133,3 +133,33 @@ func TestManagerStartRemovesStaleStateWithoutSignallingProcess(t *testing.T) {
 		t.Fatalf("stale state was not replaced: %+v", stored)
 	}
 }
+
+func TestManagerStatusDistinguishesStoppedRunningAndStale(t *testing.T) {
+	slot := enabledStartSlot(t)
+	startedAt := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	proc := ProcProcess{PID: 42, StartedAt: startedAt, Identity: "identity", Command: shellCommand(slot.StartCommand), WorkingDirectory: slot.WorkingDirectory, UserID: "1000"}
+	manager := startTestManager(t, &fakeLauncher{}, proc)
+
+	status, err := manager.Status(slot)
+	if err != nil || status.State != StatusStopped {
+		t.Fatalf("Status() = (%+v, %v), want stopped", status, err)
+	}
+	if err := os.MkdirAll(manager.StateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := ProcessState{Slot: slot.Slot, PID: 42, StartedAt: startedAt, WorkingDirectory: slot.WorkingDirectory, ProcessIdentity: "identity"}
+	if err := WriteState(manager.statePath(slot.Slot), state); err != nil {
+		t.Fatal(err)
+	}
+	status, err = manager.Status(slot)
+	if err != nil || status.State != StatusRunning || status.PID != 42 {
+		t.Fatalf("Status() = (%+v, %v), want running PID 42", status, err)
+	}
+	if err := WriteState(manager.statePath(slot.Slot), ProcessState{Slot: slot.Slot, PID: 42, StartedAt: startedAt, WorkingDirectory: slot.WorkingDirectory, ProcessIdentity: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err = manager.Status(slot)
+	if err != nil || status.State != StatusStale || status.PID != 42 {
+		t.Fatalf("Status() = (%+v, %v), want stale PID 42", status, err)
+	}
+}

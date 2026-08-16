@@ -19,6 +19,7 @@ Usage:
   orangectl [--json] [--no-color] list
   orangectl [--json] [--no-color] validate [slot1..slot10]
   orangectl [--json] [--no-color] start <slot1..slot10>
+  orangectl [--json] [--no-color] status [slot1..slot10]
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
@@ -154,6 +155,10 @@ type jsonStartResult struct {
 	State process.ProcessState `json:"state"`
 }
 
+type jsonStatusResult struct {
+	Results []process.SlotStatus `json:"results"`
+}
+
 // commandSummaries lists every CLI command with a short description.
 // The order matches the order in runCommand.
 var commandSummaries = []jsonHelpCommand{
@@ -161,6 +166,7 @@ var commandSummaries = []jsonHelpCommand{
 	{Name: "list", Summary: "show all ten slots with enabled flag and basic status"},
 	{Name: "validate", Summary: "validate one slot or all slots and report errors"},
 	{Name: "start", Summary: "start an enabled, valid slot process"},
+	{Name: "status", Summary: "show running, stopped, or stale process state"},
 	{Name: "version", Summary: "show version, source revision, and build date"},
 	{Name: "help", Summary: "show usage information"},
 }
@@ -212,6 +218,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return reportUsageError(stderr, err.Error())
 		}
 		return start(stdout, stderr, cleaned[1], opts)
+	case "status":
+		if len(cleaned) > 2 {
+			return reportUsageError(stderr, "status accepts at most one slot")
+		}
+		name := ""
+		if len(cleaned) == 2 {
+			name = cleaned[1]
+			if err := config.RequireAllowed(name); err != nil {
+				return reportUsageError(stderr, err.Error())
+			}
+		}
+		return status(stdout, stderr, name, opts)
 	case "version":
 		if len(cleaned) != 1 {
 			return reportUsageError(stderr, "version does not accept arguments")
@@ -297,6 +315,52 @@ func start(stdout, stderr io.Writer, name string, opts globalOptions) int {
 		return writeJSON(stdout, jsonStartResult{State: state})
 	}
 	fmt.Fprintf(stdout, "Started %s (PID %d)\n", state.Slot, state.PID)
+	return 0
+}
+
+func status(stdout, stderr io.Writer, requested string, opts globalOptions) int {
+	targets := config.AllowedSlots
+	if requested != "" {
+		targets = []string{requested}
+	}
+	manager := process.DefaultManager()
+	results := make([]process.SlotStatus, 0, len(targets))
+	failed := false
+	for _, name := range targets {
+		slot, err := config.Load(name)
+		if err != nil {
+			failed = true
+			reportOperationMessage(stderr, "failed to load slot %q: %s", name, err)
+			continue
+		}
+		result, err := manager.Status(slot)
+		if err != nil {
+			failed = true
+			reportOperationMessage(stderr, "failed to inspect slot %q: %s", name, err)
+			continue
+		}
+		results = append(results, result)
+	}
+	if opts.jsonOutput {
+		if writeJSON(stdout, jsonStatusResult{Results: results}) != 0 {
+			return exitOperationError
+		}
+	} else {
+		for _, result := range results {
+			if requested == "" {
+				fmt.Fprintf(stdout, "%s\t%s", result.Slot, result.State)
+			} else {
+				fmt.Fprintf(stdout, "Slot: %s\nState: %s", result.Slot, result.State)
+			}
+			if result.PID != 0 {
+				fmt.Fprintf(stdout, "\tPID: %d", result.PID)
+			}
+			fmt.Fprintln(stdout)
+		}
+	}
+	if failed {
+		return exitOperationError
+	}
 	return 0
 }
 
