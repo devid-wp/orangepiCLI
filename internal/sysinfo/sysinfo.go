@@ -3,6 +3,7 @@ package sysinfo
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,33 @@ type Source interface {
 	ReadFile(string) ([]byte, error)
 	Now() time.Time
 }
+
+// NetworkSource is independent from the host interface list in tests.
+type NetworkSource interface{ LocalIPs() ([]string, error) }
+type osNetworkSource struct{}
+
+func (osNetworkSource) LocalIPs() ([]string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	var result []string
+	for _, iface := range interfaces {
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			host, _, err := net.SplitHostPort(addr.String())
+			if err != nil {
+				host = addr.String()
+			}
+			if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
+				result = append(result, ip.String())
+			}
+		}
+	}
+	return result, nil
+}
+func LocalIPs(source NetworkSource) ([]string, error) { return source.LocalIPs() }
+
 type osSource struct{}
 
 func (osSource) Hostname() (string, error)            { return os.Hostname() }
