@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/devid-wp/orangepiCLI/internal/buildinfo"
 	"github.com/devid-wp/orangepiCLI/internal/config"
@@ -20,13 +22,14 @@ Usage:
   orangectl [--json] [--no-color] validate [slot1..slot10]
   orangectl [--json] [--no-color] start <slot1..slot10>
   orangectl [--json] [--no-color] status [slot1..slot10]
-  orangectl [--json] [--no-color] stop <slot1..slot10>
+  orangectl [--json] [--no-color] [--timeout 10s] stop <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
 
 Global flags:
   --json       Emit machine-readable JSON on stdout.
   --no-color   Disable ANSI colour escapes. Respects NO_COLOR and TERM=dumb.
+  --timeout D  Stop timeout (default: 10s); valid only with stop.
 
 Each command's exit code is 0 on success, 1 on operational failure, and 2
 on usage errors (unknown command, bad arguments, unknown slot).
@@ -47,8 +50,10 @@ const exitOperationError = 1
 // command. They are extracted from the raw argument list before the
 // dispatcher consults args[0].
 type globalOptions struct {
-	jsonOutput bool
-	noColor    bool
+	jsonOutput  bool
+	noColor     bool
+	stopTimeout time.Duration
+	timeoutSet  bool
 }
 
 // parseGlobalOptions walks the argument list and separates global
@@ -57,15 +62,34 @@ type globalOptions struct {
 // global flags return a usage-class error so the caller can route it
 // through reportUsageError.
 func parseGlobalOptions(args []string) (cleaned []string, opts globalOptions, err error) {
-	for _, arg := range args {
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
 		switch arg {
 		case "--json", "-json":
 			opts.jsonOutput = true
 		case "--no-color", "-no-color":
 			opts.noColor = true
+		case "--timeout":
+			if index+1 >= len(args) {
+				return nil, opts, fmt.Errorf("--timeout requires a duration")
+			}
+			index++
+			duration, parseErr := time.ParseDuration(args[index])
+			if parseErr != nil || duration <= 0 {
+				return nil, opts, fmt.Errorf("--timeout must be a positive duration")
+			}
+			opts.stopTimeout, opts.timeoutSet = duration, true
 		case "-h", "--help", "help":
 			cleaned = append(cleaned, arg)
 		default:
+			if strings.HasPrefix(arg, "--timeout=") {
+				duration, parseErr := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
+				if parseErr != nil || duration <= 0 {
+					return nil, opts, fmt.Errorf("--timeout must be a positive duration")
+				}
+				opts.stopTimeout, opts.timeoutSet = duration, true
+				continue
+			}
 			if len(arg) > 1 && arg[0] == '-' {
 				return nil, opts, fmt.Errorf("unknown global flag %q", arg)
 			}
@@ -185,6 +209,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprint(stdout, usage)
 		return 0
+	}
+	if opts.timeoutSet && cleaned[0] != "stop" {
+		return reportUsageError(stderr, "--timeout is valid only with stop")
 	}
 
 	switch cleaned[0] {
@@ -379,7 +406,11 @@ func stop(stdout, stderr io.Writer, name string, opts globalOptions) int {
 	if err != nil {
 		return reportOperationError(stderr, err)
 	}
-	if err := process.DefaultManager().Stop(slot); err != nil {
+	manager := process.DefaultManager()
+	if opts.timeoutSet {
+		manager.StopTimeout = opts.stopTimeout
+	}
+	if err := manager.Stop(slot); err != nil {
 		return reportOperationError(stderr, err)
 	}
 	if opts.jsonOutput {
