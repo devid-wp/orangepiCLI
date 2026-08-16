@@ -16,6 +16,7 @@ import (
 	"github.com/devid-wp/orangepiCLI/internal/config"
 	"github.com/devid-wp/orangepiCLI/internal/logview"
 	"github.com/devid-wp/orangepiCLI/internal/process"
+	"github.com/devid-wp/orangepiCLI/internal/sysinfo"
 	"github.com/devid-wp/orangepiCLI/internal/term"
 )
 
@@ -31,6 +32,7 @@ Usage:
   orangectl [--json] [--no-color] restart <slot1..slot10>
   orangectl [--json] [--no-color] [--lines N] [--follow] logs <slot1..slot10>
   orangectl edit <slot1..slot10>
+  orangectl system
   orangectl --yes reset <slot1..slot10>
   orangectl [--json] [--no-color] version
   orangectl [--json] [--no-color] help
@@ -345,6 +347,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return reportOperationError(stderr, err)
 		}
 		return 0
+	case "system":
+		if len(cleaned) != 1 {
+			return reportUsageError(stderr, "system does not accept arguments")
+		}
+		return systemInfo(stdout, stderr, opts)
 	case "reset":
 		if len(cleaned) != 2 {
 			return reportUsageError(stderr, "reset requires exactly one slot")
@@ -570,6 +577,25 @@ func logs(stdout, stderr io.Writer, name string, opts globalOptions, count int) 
 	}
 	return 0
 }
+
+func systemInfo(stdout, stderr io.Writer, opts globalOptions) int {
+	info, err := sysinfo.Default()
+	if err != nil {
+		return reportOperationError(stderr, err)
+	}
+	temperature, _ := sysinfo.Temperature(sysinfoSource{})
+	if opts.jsonOutput {
+		return writeJSON(stdout, map[string]any{"hostname": info.Hostname, "uptime_seconds": info.UptimeSeconds, "temperature": temperature})
+	}
+	fmt.Fprintf(stdout, "Hostname: %s\nUptime: %ds\nTemperature: %s\n", info.Hostname, info.UptimeSeconds, temperature)
+	return 0
+}
+
+type sysinfoSource struct{}
+
+func (sysinfoSource) Hostname() (string, error)            { return os.Hostname() }
+func (sysinfoSource) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+func (sysinfoSource) Now() time.Time                       { return time.Now() }
 
 func initialize(stdout, stderr io.Writer, opts globalOptions) int {
 	result, err := config.Initialize()
