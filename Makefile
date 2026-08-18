@@ -2,7 +2,7 @@ APP := orangectl
 PKG := ./cmd/orangectl
 DIST := dist
 
-.PHONY: fmt vet test race check build linux-arm64 linux-arm install uninstall checksums
+.PHONY: fmt vet test race integration check build linux-arm64 linux-arm install uninstall checksums
 
 fmt:
 	gofmt -w $$(go list -f '{{.Dir}}' ./...)
@@ -15,6 +15,9 @@ test:
 
 race:
 	go test -race ./...
+
+integration:
+	go test -tags=integration ./internal/process ./internal/logview
 
 check: fmt vet test race
 
